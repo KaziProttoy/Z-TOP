@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+backend/z_top.db
+backend/uploads/
+backend/profile_photos/
+backend/qdrant_data/
+frontend/node_modules/
+frontend/.next/
