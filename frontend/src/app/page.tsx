@@ -1776,7 +1776,7 @@ export default function Home() {
                   <span>{chatCourse ? `${chatCourse.code} - ${chatCourse.title}` : "General conversation"}</span>
                   <span className="grounded-tag">
                     <Sparkles size={13} />
-                    {chatCourse ? "COURSE + WEB" : "GEMINI AI"}
+                    {chatCourse ? "COURSE NOTES" : "GROQ AI"}
                   </span>
                 </div>
                 <div className="chat-history-tools">
@@ -1793,7 +1793,7 @@ export default function Home() {
                       </div>
                       <h2>What are you working through?</h2>
                       <p>
-                        Ask anything. Select a course above to include your notes; Gemini can search the web when they don&apos;t have enough detail.
+                        Ask anything. Select a course above to include your notes and receive source-based answers.
                       </p>
                       <div className="prompt-chips">
                         <button

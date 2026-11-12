@@ -381,7 +381,7 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .message-avatar { display: grid; width: 26px; height: 26px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #e7efe5; color: #477557; font-size: 10px; }
 .message-user .message-avatar { background: #efe4d8; color: #77583c; }
 .message-body { min-width: 0; }
-.message-body > p { margin: 3px 0 9px; color: #354139; font-size: 12px; line-height: 1.7; }
+.message-body > p { margin: 3px 0 9px; color: #354139; font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
 .chat-thinking .message-body > p { display: inline-flex; align-items: center; gap: 7px; color: #78877b; font-size: 11px; }
 .citation { max-width: 660px; margin-top: 8px; border-left: 2px solid #79a183; border-radius: 0 5px 5px 0; padding: 9px 11px; background: #f4f7f1; }
 .citation > div { display: flex; align-items: center; gap: 6px; color: #63806a; font-size: 9px; }
