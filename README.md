@@ -54,65 +54,51 @@ Z-TOP/
 └── README.md
 ```
 
-## Requirements
+## Public deployment
 
-Install the following before running the project:
+Z-Top is intended to run as a **public website**, with the Next.js frontend and FastAPI backend deployed as separate services. The steps below describe the production setup. The exact dashboard screens and configuration names depend on the hosting providers you choose.
 
-- Python 3.10 or newer
-- Node.js and npm
-- Git
-- Tesseract OCR if you want to extract text from uploaded images or scanned PDF pages
+### Production architecture
 
-The backend uses Tesseract for OCR. On Windows, install Tesseract OCR and make sure `tesseract.exe` is available on your PATH. The backend also checks the standard Program Files installation locations.
+- **Frontend:** Deploy the Next.js app to a Node.js-compatible hosting platform.
+- **Backend:** Deploy the FastAPI app to a Python-compatible hosting platform that supports a persistent service and exposes an HTTPS URL.
+- **Database:** Use managed PostgreSQL rather than the default local SQLite database.
+- **Vector database:** Use Qdrant Cloud (or another reachable hosted Qdrant instance); do not rely on a local Qdrant directory on an ephemeral host.
+- **Uploaded files:** Configure Supabase Storage or another durable object-storage service. Files saved only to the backend's local filesystem may be lost when a hosted service restarts or is redeployed.
 
-## Run locally
+### Deployment steps
 
-Run the backend and frontend in separate terminals.
+1. **Prepare the managed services.** Create a PostgreSQL database, a hosted Qdrant collection, and (recommended) a Supabase Storage bucket. Keep all service credentials private.
+2. **Deploy the backend.** Connect the repository's `backend/` directory to your Python host. Install dependencies with `pip install -r requirements.txt` and configure the service to start with:
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port $PORT
+   ```
+   If your host uses a different port-variable convention, use the command format it documents.
+3. **Set backend environment variables.** Configure at least `DATABASE_URL`, a strong random `TOKEN_SECRET`, `FRONTEND_ORIGIN`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `QDRANT_URL`, and `QDRANT_API_KEY`. Configure the three Supabase variables if you use Supabase Storage. Use the production frontend's HTTPS origin for `FRONTEND_ORIGIN`.
+4. **Verify the backend.** After deployment, open `https://<your-backend-domain>/api/health`. The interactive API documentation is at `https://<your-backend-domain>/docs`.
+5. **Deploy the frontend.** Connect the repository's `frontend/` directory to a Next.js-compatible host. Set `NEXT_PUBLIC_API_URL` to the deployed backend's HTTPS base URL (for example, `https://api.example.com`), then build the app with `npm run build`. Use the host's normal Next.js start/runtime configuration.
+6. **Connect the domains.** Set `FRONTEND_ORIGIN` to the exact public frontend origin, including the scheme (for example, `https://z-top.example.com`). Confirm the frontend calls the deployed backend rather than a localhost URL.
+7. **Test the live site.** Register a test account, sign in, create a course, upload a document, and test Z-Chat and the study tools. Also verify that uploaded files and database records remain available after a backend redeploy.
 
-### 1. Clone the repository
+Do not copy the example domain names above as real settings. Replace them with the actual URLs assigned by your hosting providers. The repository does not currently include provider-specific deployment configuration, so the exact click-by-click setup depends on where you host the frontend, backend, database, and storage.
 
-```bash
-git clone https://github.com/KaziProttoy/Z-TOP.git
-cd Z-TOP
-```
+### Optional local development
 
-### 2. Configure and start the backend
+Localhost is only for development on your own computer; it is not the public website address. If you or another developer later need to run the project locally, use the commands below.
 
-**Windows PowerShell**
-
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
-```
-
-**macOS / Linux**
+**Backend (from the repository root):**
 
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate
+# Windows PowerShell: .\\.venv\\Scripts\\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-```
-
-Open `backend/.env` and add the API keys you intend to use (see [Environment variables](#environment-variables) below). Then start the API:
-
-```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-The API will be available at:
-
-- API base URL: `http://localhost:8000`
-- Interactive API documentation: `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/api/health`
-
-### 3. Configure and start the frontend
-
-Open a second terminal from the repository root:
+**Frontend (in a second terminal):**
 
 ```bash
 cd frontend
@@ -120,9 +106,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-The frontend uses `NEXT_PUBLIC_API_URL` for the backend origin and defaults to `http://localhost:8000`, so no frontend environment file is required for the default local setup.
+For local development, the frontend is at `http://localhost:3000` and the backend is at `http://localhost:8000`. These addresses are not used by visitors to the deployed website.
 
 ## Environment variables
 
@@ -132,7 +116,7 @@ The backend loads `backend/.env` when its AI module starts. Keep real keys and s
 |---|---|
 | `DATABASE_URL` | SQLAlchemy database connection. Defaults to a local SQLite database at `backend/z_top.db`. PostgreSQL URLs are normalized for psycopg 3. |
 | `TOKEN_SECRET` | Secret used to sign login tokens. Replace the development value with a long, random secret before deployment. |
-| `FRONTEND_ORIGIN` | Frontend origin allowed by backend CORS. Defaults to `http://localhost:3000`. |
+| `FRONTEND_ORIGIN` | Frontend origin allowed by backend CORS. Defaults to `http://localhost:3000` for local development; set it to the deployed frontend origin in production. |
 | `GROQ_API_KEY` | Enables AI text generation for Z-Chat, flashcards, quizzes, takeaways, and AI-assisted syllabus deadline extraction. |
 | `GROQ_MODEL` | Optional Groq model name. Defaults to `openai/gpt-oss-120b`. |
 | `GROQ_NATIVE_JSON` | Set to `true` to request Groq's JSON response mode for structured generation. |
@@ -146,7 +130,7 @@ The backend loads `backend/.env` when its AI module starts. Keep real keys and s
 | `SUPABASE_URL` | Optional Supabase project URL for remote file storage. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional Supabase service-role key. Keep this secret and server-side only. |
 | `SUPABASE_STORAGE_BUCKET` | Supabase Storage bucket name. Supabase storage is enabled only when all three Supabase variables are set. |
-| `NEXT_PUBLIC_API_URL` | Optional frontend API base URL. Defaults to `http://localhost:8000`. |
+| `NEXT_PUBLIC_API_URL` | Frontend API base URL. Set this to the deployed backend's HTTPS URL in production; the localhost default is for local development only. |
 
 ### AI and storage behavior
 
@@ -193,7 +177,7 @@ All routes below are under the `/api` prefix. Except for the health check and re
 | GET | `/analytics` | Study-time and quiz analytics |
 | POST | `/study-sessions` | Log a study session |
 
-For request schemas, response examples, and interactive testing, run the backend and open `http://localhost:8000/docs`.
+For request schemas, response examples, and interactive testing on the deployed service, open `https://<your-backend-domain>/docs`. For local development only, the docs are available at `http://localhost:8000/docs`.
 
 ## Database entities
 
@@ -211,7 +195,7 @@ The SQLAlchemy models in `backend/app/main.py` define these tables:
 
 Course and user ownership checks are applied by the API before returning or changing private academic data.
 
-## Useful commands
+## Development commands (optional)
 
 From `frontend/`:
 
@@ -242,7 +226,7 @@ uvicorn app.main:app --reload --port 8000
 - Image and scanned-PDF OCR requires the Tesseract OCR executable to be installed on the machine running the backend.
 - Semantic document search requires both Gemini embeddings and a working Qdrant store. Without embeddings, course chat uses keyword-based matching.
 - The repository contains quiz-generation and quiz-submission endpoints, as well as quiz database models. The current quiz-generation handler returns generated questions but does not create a quiz database record, so the submission endpoint's persisted-quiz flow needs to be completed before quiz scores can be reliably saved and shown in analytics.
-- The backend's environment template does not currently include every optional integration variable. See the table above and add the required values to your local `.env` file as needed.
+- The backend's environment template does not currently include every optional integration variable. Configure the required values in your hosting provider's backend environment settings; do not commit secrets to the repository.
 
 ## License
 
