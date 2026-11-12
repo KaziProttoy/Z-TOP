@@ -8,6 +8,8 @@ import logging
 import os
 import re
 import secrets
+import shutil
+import io
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -15,13 +17,17 @@ from typing import Any, Literal
 from docx import Document as WordDocument
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from pypdf import PdfReader
+import fitz
+from PIL import Image
+import pytesseract
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, create_engine, func, inspect, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 from . import ai
+from . import storage
 from .planner import extract_deadlines, split_topics
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -355,16 +361,49 @@ def _course_json(course: Course) -> dict[str, Any]:
 def _extract(file_name: str, data: bytes) -> list[tuple[int, str]]:
     suffix = Path(file_name).suffix.lower()
     if suffix in IMAGE_EXTENSIONS:
-        return []
+        return [(1, _ocr_image(data))]
     if suffix == ".pdf":
         reader = PdfReader(__import__("io").BytesIO(data))
-        return [(index + 1, page.extract_text() or "") for index, page in enumerate(reader.pages)]
+        pages: list[tuple[int, str]] = []
+        pdf = fitz.open(stream=data, filetype="pdf")
+        for index, page in enumerate(reader.pages):
+            text = page.extract_text() or ""
+            if not text.strip():
+                rendered = pdf[index].get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False).tobytes("png")
+                text = _ocr_image(rendered)
+            pages.append((index + 1, text))
+        pdf.close()
+        return pages
     if suffix == ".docx":
         document = WordDocument(__import__("io").BytesIO(data))
         return [(1, "\n".join(p.text for p in document.paragraphs))]
     if suffix in {".txt", ".md"}:
         return [(1, data.decode("utf-8", errors="replace"))]
     raise HTTPException(status_code=415, detail="Upload a PDF, DOCX, TXT, or Markdown file")
+
+
+def _ocr_image(data: bytes) -> str:
+    executable = shutil.which("tesseract")
+    if executable is None:
+        for candidate in (
+            Path(os.getenv("PROGRAMFILES", "")) / "Tesseract-OCR" / "tesseract.exe",
+            Path(os.getenv("PROGRAMFILES(X86)", "")) / "Tesseract-OCR" / "tesseract.exe",
+        ):
+            if candidate.exists():
+                executable = str(candidate)
+                break
+    if executable is None:
+        raise HTTPException(
+            status_code=503,
+            detail="OCR is not installed. Install Tesseract OCR, then restart the backend.",
+        )
+    pytesseract.pytesseract.tesseract_cmd = executable
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            return pytesseract.image_to_string(image).strip()
+    except Exception as error:
+        logger.exception("OCR failed")
+        raise HTTPException(status_code=422, detail="The image could not be read by OCR") from error
 
 
 def _chunks(pages: list[tuple[int, str]]) -> list[tuple[int, str]]:
@@ -383,7 +422,7 @@ def _chunks(pages: list[tuple[int, str]]) -> list[tuple[int, str]]:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "z-top-api", "geminiConfigured": ai.gemini_ready(), "vectorStore": "qdrant-cloud" if os.getenv("QDRANT_URL") else "qdrant-local"}
+    return {"status": "ok", "service": "z-top-api", "groqConfigured": ai.groq_ready(), "vectorStore": "qdrant-cloud" if os.getenv("QDRANT_URL") else "qdrant-local"}
 
 
 @app.post("/api/auth/register")
@@ -447,6 +486,10 @@ def _student_photo_path(user_id: int) -> Path | None:
     return None
 
 
+def _storage_path(kind: str, identifier: int, suffix: str) -> str:
+    return f"{kind}/{identifier}{suffix}"
+
+
 @app.get("/api/profile")
 def get_student_profile(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return _student_profile_json(user, db.get(StudentProfile, user.id))
@@ -498,6 +541,14 @@ def update_student_profile(payload: StudentProfileInput, user: User = Depends(cu
 
 @app.get("/api/profile/photo")
 def get_student_profile_photo(user: User = Depends(current_user)):
+    if storage.configured():
+        for extension in IMAGE_EXTENSIONS:
+            path = _storage_path("profile-photos", user.id, extension)
+            try:
+                data = storage.download(path)
+            except Exception:
+                continue
+            return Response(content=data, media_type=ORIGINAL_CONTENT_TYPES[extension], headers={"Content-Disposition": f'inline; filename="{user.id}{extension}"'})
     photo_path = _student_photo_path(user.id)
     if photo_path is None:
         raise HTTPException(status_code=404, detail="No profile photo has been added")
@@ -517,6 +568,15 @@ async def save_student_profile_photo(file: UploadFile = File(...), user: User = 
     data = await file.read(5 * 1024 * 1024 + 1)
     if len(data) > 5 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Profile photos must be 5 MB or smaller")
+    if storage.configured():
+        try:
+            storage.upload(_storage_path("profile-photos", user.id, extension), data, file.content_type or ORIGINAL_CONTENT_TYPES[extension])
+            for previous_extension in IMAGE_EXTENSIONS - {extension}:
+                storage.remove(_storage_path("profile-photos", user.id, previous_extension))
+        except Exception as error:
+            logger.exception("Could not save profile photo to Supabase for user %s", user.id)
+            raise HTTPException(status_code=502, detail="Could not save the profile photo") from error
+        return {"photoAvailable": True}
     PROFILE_PHOTO_DIR.mkdir(parents=True, exist_ok=True)
     photo_path = PROFILE_PHOTO_DIR / f"{user.id}{extension}"
     temporary_path = PROFILE_PHOTO_DIR / f"{user.id}.uploading"
@@ -534,6 +594,14 @@ async def save_student_profile_photo(file: UploadFile = File(...), user: User = 
 
 @app.delete("/api/profile/photo")
 def delete_student_profile_photo(user: User = Depends(current_user)):
+    if storage.configured():
+        try:
+            for extension in IMAGE_EXTENSIONS:
+                storage.remove(_storage_path("profile-photos", user.id, extension))
+        except Exception as error:
+            logger.exception("Could not remove profile photo from Supabase for user %s", user.id)
+            raise HTTPException(status_code=502, detail="Could not remove the profile photo") from error
+        return {"photoAvailable": False}
     for extension in IMAGE_EXTENSIONS:
         (PROFILE_PHOTO_DIR / f"{user.id}{extension}").unlink(missing_ok=True)
     return {"photoAvailable": False}
@@ -615,9 +683,12 @@ async def upload_document(course_id: int, file: UploadFile = File(...), user: Us
     db.add(document)
     db.flush()
     stored_file = UPLOAD_DIR / f"{document.id}{suffix}"
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        stored_file.write_bytes(data)
+        if storage.configured():
+            storage.upload(_storage_path("documents", document.id, suffix), data, file.content_type or ORIGINAL_CONTENT_TYPES[suffix])
+        else:
+            UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            stored_file.write_bytes(data)
         db.commit()
     except Exception:
         stored_file.unlink(missing_ok=True)
@@ -657,7 +728,14 @@ def read_document_file(course_id: int, document_id: int, user: User = Depends(cu
         raise HTTPException(status_code=404, detail="Document not found")
     suffix = Path(document.file_name).suffix.lower()
     stored_file = UPLOAD_DIR / f"{document.id}{suffix}"
-    if suffix not in ORIGINAL_CONTENT_TYPES or not stored_file.is_file():
+    if suffix not in ORIGINAL_CONTENT_TYPES:
+        raise HTTPException(status_code=404, detail="Original file is unavailable. Upload the file again to view it.")
+    if storage.configured():
+        try:
+            return Response(content=storage.download(_storage_path("documents", document.id, suffix)), media_type=ORIGINAL_CONTENT_TYPES[suffix], headers={"Content-Disposition": f'inline; filename="{document.file_name}"'})
+        except Exception as error:
+            raise HTTPException(status_code=404, detail="Original file is unavailable. Upload the file again to view it.") from error
+    if not stored_file.is_file():
         raise HTTPException(status_code=404, detail="Original file is unavailable. Upload the file again to view it.")
     return FileResponse(
         stored_file,
@@ -683,7 +761,10 @@ def delete_document(course_id: int, document_id: int, user: User = Depends(curre
     db.delete(document)
     db.commit()
     try:
-        stored_file.unlink(missing_ok=True)
+        if storage.configured():
+            storage.remove(_storage_path("documents", document.id, suffix))
+        else:
+            stored_file.unlink(missing_ok=True)
     except OSError:
         logger.exception("Could not remove original file for document %s", document.id)
     return {"deleted": True}
@@ -721,7 +802,7 @@ def grounded_chat(course_id: int, payload: ChatInput, user: User = Depends(curre
     answer = ai.NO_GROUNDED_ANSWER
     citations: list[dict[str, Any]] = []
     if sources:
-        if ai.gemini_ready():
+        if ai.groq_ready():
             try:
                 generated = ai.answer_from_context(payload.question, history, sources)
                 answer = generated["answer"]
@@ -755,7 +836,7 @@ def list_chat_messages(session_id: int, user: User = Depends(current_user), db: 
 
 @app.post("/api/general-chats")
 def general_chat(payload: GeneralChatInput, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    if not ai.gemini_ready():
+    if not ai.groq_ready():
         raise HTTPException(status_code=503, detail="General Z-Chat needs a Gemini API key. Add GEMINI_API_KEY to backend/.env and restart the API.")
     course_sources: list[dict[str, Any]] = []
     if payload.course_id is not None:
@@ -793,12 +874,36 @@ def _selected_study_documents(course: Course, document_ids: list[int] | None) ->
 
 
 def _sentences(documents: list[CourseDocument]) -> list[str]:
-    text = " ".join(document.content for document in documents)
-    return [part.strip() for part in re.split(r"(?<=[.!?])\s+", text) if len(part.strip()) >= 40]
+    sentences: list[str] = []
+    seen: set[str] = set()
+    for document in documents:
+        for part in re.split(r"(?<=[.!?])\s+", document.content or ""):
+            sentence = re.sub(r"\s+", " ", part).strip()
+            identity = sentence.casefold()
+            if len(sentence) >= 40 and identity not in seen:
+                seen.add(identity)
+                sentences.append(sentence)
+    return sentences
+
+
+def _unique_document_text(document: CourseDocument) -> str:
+    unique_pages: list[str] = []
+    seen_pages: set[str] = set()
+    for _, page_text in json.loads(document.pages_json):
+        page = re.sub(r"\s+", " ", page_text).strip()
+        identity = page.casefold()
+        if page and identity not in seen_pages:
+            seen_pages.add(identity)
+            unique_pages.append(page)
+    return "\n\n".join(unique_pages)
 
 
 def _study_source(documents: list[CourseDocument]) -> str:
-    return "\n\n".join(f"{document.file_name}: {document.content[:24000]}" for document in documents)[:50000]
+    sources: list[str] = []
+    for document in documents:
+        text = _unique_document_text(document)
+        sources.append(f"{document.file_name}:\n{text[:24000]}")
+    return "\n\n".join(sources)[:50000]
 
 
 def _course_chat_sources(course: Course, question: str, limit: int = 6) -> list[dict[str, Any]]:
@@ -818,10 +923,67 @@ def _course_chat_sources(course: Course, question: str, limit: int = 6) -> list[
 
 
 def _valid_cards(value: dict[str, Any]) -> list[dict[str, str]]:
-    cards = value.get("cards")
+    cards = value.get("cards") or value.get("questions")
     if not isinstance(cards, list):
         return []
-    return [{"question": item["question"].strip(), "answer": item["answer"].strip()} for item in cards if isinstance(item, dict) and isinstance(item.get("question"), str) and item["question"].strip() and isinstance(item.get("answer"), str) and item["answer"].strip()][:20]
+    valid: list[dict[str, str]] = []
+    seen_questions: set[str] = set()
+    for item in cards:
+        if not isinstance(item, dict):
+            continue
+        question = item.get("question")
+        answer = item.get("answer")
+        if not isinstance(question, str) or not question.strip() or not isinstance(answer, str) or not answer.strip():
+            continue
+        question = question.strip()
+        answer = answer.strip()
+        if len(answer) < 20 or len(answer) > 600:
+            continue
+        if question.lower().startswith(("what is the main idea of this statement?", "what does this passage explain?")):
+            continue
+        identity = re.sub(r"\W+", " ", question).strip().lower()
+        if identity in seen_questions:
+            continue
+        seen_questions.add(identity)
+        valid.append({"question": question, "answer": answer})
+    return valid[:20]
+
+
+def _fallback_flashcards(sentences: list[str]) -> list[dict[str, str]]:
+    prompts = (
+        "What is the main idea of this statement?",
+        "What fact should you remember from this passage?",
+        "What process or relationship is described here?",
+        "What does this passage tell us about the topic?",
+    )
+    cards: list[dict[str, str]] = []
+    for index, sentence in enumerate(sentences[:20]):
+        excerpt = sentence.rstrip(".!?").strip()
+        if len(excerpt) > 90:
+            excerpt = f"{excerpt[:87].rstrip()}..."
+        cards.append({
+            "question": f'{prompts[index % len(prompts)]} "{excerpt}"',
+            "answer": sentence,
+        })
+    return cards
+
+
+def _valid_takeaways(value: dict[str, Any]) -> list[str]:
+    takeaways = value.get("takeaways")
+    if not isinstance(takeaways, list):
+        return []
+    valid: list[str] = []
+    seen: set[str] = set()
+    for item in takeaways:
+        if not isinstance(item, str):
+            continue
+        text = re.sub(r"\s+", " ", item).strip(" -*\t\r\n")
+        identity = text.casefold()
+        if len(text) < 40 or len(text) > 500 or identity in seen:
+            continue
+        seen.add(identity)
+        valid.append(text)
+    return valid[:12]
 
 
 @app.post("/api/courses/{course_id}/flashcards")
@@ -833,16 +995,28 @@ def generate_flashcards(course_id: int, payload: StudySourcesInput | None = None
         raise HTTPException(status_code=422, detail="Upload readable notes before creating flashcards")
     topic = "Key ideas"
     cards: list[dict[str, str]] = []
-    if ai.gemini_ready():
+    if ai.groq_ready():
         schema = {"type": "object", "properties": {"topic": {"type": "string"}, "cards": {"type": "array", "items": {"type": "object", "properties": {"question": {"type": "string"}, "answer": {"type": "string"}}, "required": ["question", "answer"]}}}, "required": ["topic", "cards"]}
         try:
-            generated = ai.generate_json(f"Create up to 20 concise, accurate question-and-answer flashcards using only these course notes. Preserve formulas and definitions exactly.\n\n{_study_source(documents)}", schema)
+            generated = ai.generate_json(f"Create up to 20 high-quality question-and-answer flashcards using only these course notes. Every question must be different and test a different fact, definition, process, or relationship. Write a natural, specific question, not a reference to 'this passage'. Give a concise answer of one to three sentences that directly answers the question. Do not copy the entire notes into a question or answer. Never repeat a generic question such as 'What does this passage explain?'. Preserve formulas and definitions exactly.\n\n{_study_source(documents)}", schema)
             topic = str(generated.get("topic", topic))[:160]
             cards = _valid_cards(generated)
         except Exception:
-            logger.exception("Gemini flashcard generation failed for course %s", course.id)
+            logger.exception("Groq flashcard generation failed for course %s", course.id)
+        if not cards:
+            try:
+                generated = ai.generate_json(
+                    f"Create exactly 8 study flashcards from the notes below. Return JSON with a cards array. "
+                    "Each card must have a specific question and a concise answer of one to three sentences. "
+                    "Do not use the document title as a question or answer. Do not repeat questions. "
+                    f"Use only facts present in the notes.\n\n{_study_source(documents)[:12000]}",
+                    schema,
+                )
+                cards = _valid_cards(generated)
+            except Exception:
+                logger.exception("Groq flashcard retry failed for course %s", course.id)
     if not cards:
-        cards = [{"question": "What does this passage explain?", "answer": sentence} for sentence in sentences[:20]]
+        cards = _fallback_flashcards(sentences)
     return {"topic": topic, "cards": cards}
 
 
@@ -855,7 +1029,7 @@ def generate_quiz(course_id: int, payload: StudySourcesInput | None = None, user
         raise HTTPException(status_code=422, detail="Upload readable notes before creating a quiz")
     title = "Course review"
     questions: list[dict[str, Any]] = []
-    if ai.gemini_ready():
+    if ai.groq_ready():
         schema = {"type": "object", "properties": {"title": {"type": "string"}, "questions": {"type": "array", "items": {"type": "object", "properties": {"question": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}}, "correctIndex": {"type": "integer"}, "explanation": {"type": "string"}}, "required": ["question", "options", "correctIndex", "explanation"]}}}, "required": ["title", "questions"]}
         try:
             generated = ai.generate_json(f"Create 5 multiple-choice questions that test understanding of these notes. Each must have four distinct answer options, exactly one correct answer, a valid zero-based correctIndex, and a short explanation based only on the notes. Do not make the correct answer obvious by position.\n\n{_study_source(documents)}", schema)
@@ -864,7 +1038,7 @@ def generate_quiz(course_id: int, payload: StudySourcesInput | None = None, user
             if isinstance(candidate_questions, list):
                 questions = [item for item in candidate_questions if isinstance(item, dict) and isinstance(item.get("question"), str) and isinstance(item.get("options"), list) and len(item["options"]) == 4 and all(isinstance(option, str) for option in item["options"]) and isinstance(item.get("correctIndex"), int) and 0 <= item["correctIndex"] < 4 and isinstance(item.get("explanation"), str)][:10]
         except Exception:
-            logger.exception("Gemini quiz generation failed for course %s", course.id)
+            logger.exception("Groq quiz generation failed for course %s", course.id)
     if not questions:
         questions = [{"question": "Which statement is supported by the course notes?", "options": [sentence, "The notes provide no relevant information.", "The opposite of the cited statement is true.", "None of the above."], "correctIndex": 0, "explanation": f"This answer is stated in the uploaded notes: {sentence}"} for sentence in sentences[:10]]
     return {"title": title, "questions": questions}
@@ -895,22 +1069,32 @@ def generate_summary(course_id: int, payload: StudySourcesInput | None = None, u
     if not sentences:
         raise HTTPException(status_code=422, detail="Upload readable notes before creating key takeaways")
     cards: list[dict[str, str]] = []
-    if ai.gemini_ready():
+    if ai.groq_ready():
         schema = {"type": "object", "properties": {"takeaways": {"type": "array", "items": {"type": "string"}}}, "required": ["takeaways"]}
         try:
-            generated = ai.generate_json(f"Summarize these course notes as up to 10 concise key takeaways. Use only the notes; retain important terminology and do not add outside facts.\n\n{_study_source(documents)}", schema)
-            takeaways = generated.get("takeaways", [])
-            if isinstance(takeaways, list):
-                cards = [{"question": "Key takeaway", "answer": item.strip()} for item in takeaways if isinstance(item, str) and item.strip()][:12]
+            generated = ai.generate_json(f"Create up to 10 high-quality key takeaways from these course notes. Each takeaway must express one important concept in your own words, be specific and useful for exam revision, and be one to three sentences. Do not copy slide navigation, document titles, page headings, repeated text, or entire paragraphs. Use only facts supported by the notes. Return concise JSON.\n\n{_study_source(documents)}", schema)
+            takeaways = _valid_takeaways(generated)
+            cards = [{"question": "Key takeaway", "answer": item} for item in takeaways]
         except Exception:
-            logger.exception("Gemini summary generation failed for course %s", course.id)
+            logger.exception("Groq summary generation failed for course %s", course.id)
+        if not cards:
+            try:
+                generated = ai.generate_json(
+                    f"Create exactly 6 concise key takeaways from these notes. Return JSON with a takeaways array. "
+                    "Each item must be a specific concept in one or two sentences, not a title or copied paragraph. "
+                    f"Use only the notes below.\n\n{_study_source(documents)[:12000]}",
+                    schema,
+                )
+                cards = [{"question": "Key takeaway", "answer": item} for item in _valid_takeaways(generated)]
+            except Exception:
+                logger.exception("Groq summary retry failed for course %s", course.id)
     if not cards:
-        cards = [{"question": "Key takeaway", "answer": sentence} for sentence in sentences[:12]]
+        cards = [{"question": "Key takeaway", "answer": sentence} for sentence in sentences[:12] if len(sentence) >= 80][:12]
     return {"title": f"{course.code} key takeaways", "cards": cards}
 
 
 def _syllabus_deadlines(text: str) -> list[dict[str, str]]:
-    if ai.gemini_ready():
+    if ai.groq_ready():
         schema = {"type": "object", "properties": {"deadlines": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}, "dueDate": {"type": "string"}}, "required": ["title", "dueDate"]}}}, "required": ["deadlines"]}
         try:
             result = ai.generate_json(f"Extract only explicit assignment, quiz, project, and exam deadlines from this syllabus. Preserve their stated dates; do not infer or invent any. Return dates as ISO-8601. Today is {date.today().isoformat()}.\n\n{text[:50000]}", schema)
@@ -928,7 +1112,7 @@ def _syllabus_deadlines(text: str) -> list[dict[str, str]]:
                         deadlines.append({"title": item["title"].strip()[:240], "dueDate": due.replace(tzinfo=None).isoformat()})
             return deadlines
         except Exception:
-            logger.exception("Gemini syllabus extraction failed; using explicit-date parser")
+            logger.exception("Groq syllabus extraction failed; using explicit-date parser")
     return extract_deadlines(text)
 
 
