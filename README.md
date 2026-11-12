@@ -221,13 +221,10 @@ uvicorn app.main:app --reload --port 8000
 - Use a managed PostgreSQL database and durable file/vector storage for deployments where local disk may be ephemeral.
 - Keep Supabase service-role credentials on the backend only.
 
-## Current implementation notes
-
+## Limitations
 - Image and scanned-PDF OCR requires the Tesseract OCR executable to be installed on the machine running the backend.
 - Semantic document search requires both Gemini embeddings and a working Qdrant store. Without embeddings, course chat uses keyword-based matching.
 - The repository contains quiz-generation and quiz-submission endpoints, as well as quiz database models. The current quiz-generation handler returns generated questions but does not create a quiz database record, so the submission endpoint's persisted-quiz flow needs to be completed before quiz scores can be reliably saved and shown in analytics.
 - The backend's environment template does not currently include every optional integration variable. Configure the required values in your hosting provider's backend environment settings; do not commit secrets to the repository.
 
-## License
 
-No license file is currently included in the repository. Add a license before distributing or reusing the project publicly.
