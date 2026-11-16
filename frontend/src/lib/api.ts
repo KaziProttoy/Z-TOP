@@ -1,6 +1,10 @@
 import type { OriginalFile } from './types';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+const API =
+  process.env.NEXT_PUBLIC_API_URL ??
+  (typeof window === 'undefined'
+    ? 'http://localhost:8000'
+    : `${window.location.protocol}//${window.location.hostname}:8000`);
 
 export async function api<T>(
   path: string,
@@ -11,7 +15,15 @@ export async function api<T>(
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (options.body && !(options.body instanceof FormData))
     headers.set("Content-Type", "application/json");
-  const response = await fetch(`${API}${path}`, { ...options, headers });
+  let response: Response;
+  try {
+    response = await fetch(`${API}${path}`, { ...options, headers });
+  } catch (error) {
+    throw new Error(
+      `Cannot reach the backend at ${API}. Start the API with "python -m uvicorn app.main:app --reload --port 8000".`,
+      { cause: error },
+    );
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok)
     throw new Error(body.detail ?? "The request could not be completed.");

@@ -12,17 +12,20 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import create_engine, func, inspect, select
 from sqlalchemy.orm import Session, sessionmaker
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env", override=False)
+
 from .services import ai, storage
 from .services.documents import _chunks, _extract
 from .services.planner import extract_deadlines, split_topics
 
-ROOT = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = ROOT / "uploads"
 PROFILE_PHOTO_DIR = ROOT / "profile_photos"
 ORIGINAL_CONTENT_TYPES = {
@@ -45,6 +48,17 @@ elif DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = "postgresql+psycopg://" + DATABASE_URL.removeprefix("postgresql://")
 TOKEN_SECRET = os.getenv("TOKEN_SECRET", "development-only-change-this-secret")
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
+FRONTEND_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("FRONTEND_ORIGINS", FRONTEND_ORIGIN).split(",")
+    if origin.strip()
+]
+FRONTEND_ORIGIN_REGEX = os.getenv("FRONTEND_ORIGIN_REGEX")
+if not FRONTEND_ORIGIN_REGEX and os.getenv("APP_ENV", "development").lower() != "production":
+    FRONTEND_ORIGIN_REGEX = (
+        r"https?://(?:localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+        r"192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}):3000"
+    )
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("z_top")
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {})
@@ -55,7 +69,14 @@ from .models import Base, ChatMessage, ChatSession, Course, CourseDocument, Flas
 from .schemas import ChatInput, ChatTurnInput, CourseInput, GeneralChatInput, LoginInput, PlanInput, QuizSubmission, RegisterInput, StudentProfileInput, StudyInput, StudySourcesInput, TaskInput, TaskUpdate
 
 app = FastAPI(title="Z-Top API", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=[FRONTEND_ORIGIN, "http://127.0.0.1:3000"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[*FRONTEND_ORIGINS, "http://127.0.0.1:3000"],
+    allow_origin_regex=FRONTEND_ORIGIN_REGEX,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 security = HTTPBearer(auto_error=False)
 Base.metadata.create_all(engine)
 with engine.begin() as connection:
