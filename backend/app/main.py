@@ -8,27 +8,19 @@ import logging
 import os
 import re
 import secrets
-import shutil
-import io
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-from docx import Document as WordDocument
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from pypdf import PdfReader
-import fitz
-from PIL import Image
-import pytesseract
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, create_engine, func, inspect, select
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
-from . import ai
-from . import storage
-from .planner import extract_deadlines, split_topics
+from sqlalchemy import create_engine, func, inspect, select
+from sqlalchemy.orm import Session, sessionmaker
+from .services import ai, storage
+from .services.documents import _chunks, _extract
+from .services.planner import extract_deadlines, split_topics
 
 ROOT = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = ROOT / "uploads"
@@ -59,224 +51,8 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} i
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
-class Base(DeclarativeBase):
-    pass
-
-
-class User(Base):
-    __tablename__ = "users"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(120))
-    password_salt: Mapped[str] = mapped_column(String(64))
-    password_hash: Mapped[str] = mapped_column(String(128))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    courses: Mapped[list[Course]] = relationship(back_populates="owner", cascade="all, delete-orphan")
-    tasks: Mapped[list[Task]] = relationship(back_populates="owner", cascade="all, delete-orphan")
-
-
-class StudentProfile(Base):
-    __tablename__ = "student_profiles"
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    father_name: Mapped[str] = mapped_column(String(120), default="")
-    mother_name: Mapped[str] = mapped_column(String(120), default="")
-    phone: Mapped[str] = mapped_column(String(40), default="")
-    location: Mapped[str] = mapped_column(String(160), default="")
-    education_level: Mapped[str] = mapped_column(String(40), default="")
-    school_name: Mapped[str] = mapped_column(String(160), default="")
-    school_qualification: Mapped[str] = mapped_column(String(120), default="")
-    school_start_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    school_passout_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    college_name: Mapped[str] = mapped_column(String(160), default="")
-    college_program: Mapped[str] = mapped_column(String(120), default="")
-    college_start_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    college_passout_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    institution: Mapped[str] = mapped_column(String(160), default="")
-    university_department: Mapped[str] = mapped_column(String(160), default="")
-    field_of_study: Mapped[str] = mapped_column(String(120), default="")
-    university_start_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    current_year: Mapped[str] = mapped_column(String(80), default="")
-    expected_graduation_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
-
-class Course(Base):
-    __tablename__ = "courses"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    code: Mapped[str] = mapped_column(String(30))
-    title: Mapped[str] = mapped_column(String(160))
-    color: Mapped[str] = mapped_column(String(24), default="#2e7966")
-    owner: Mapped[User] = relationship(back_populates="courses")
-    documents: Mapped[list[CourseDocument]] = relationship(back_populates="course", cascade="all, delete-orphan")
-    decks: Mapped[list[FlashcardDeck]] = relationship(back_populates="course", cascade="all, delete-orphan")
-    quizzes: Mapped[list[Quiz]] = relationship(back_populates="course", cascade="all, delete-orphan")
-
-
-class CourseDocument(Base):
-    __tablename__ = "documents"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
-    file_name: Mapped[str] = mapped_column(String(255))
-    content: Mapped[str] = mapped_column(Text)
-    pages_json: Mapped[str] = mapped_column(Text)
-    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    course: Mapped[Course] = relationship(back_populates="documents")
-
-
-class Task(Base):
-    __tablename__ = "tasks"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    course_id: Mapped[int | None] = mapped_column(ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
-    title: Mapped[str] = mapped_column(String(240))
-    due_date: Mapped[datetime] = mapped_column(DateTime)
-    status: Mapped[str] = mapped_column(String(20), default="TODO")
-    priority: Mapped[str] = mapped_column(String(10), default="MEDIUM")
-    owner: Mapped[User] = relationship(back_populates="tasks")
-
-
-class FlashcardDeck(Base):
-    __tablename__ = "flashcard_decks"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
-    topic: Mapped[str] = mapped_column(String(160))
-    cards_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    course: Mapped[Course] = relationship(back_populates="decks")
-
-
-class Quiz(Base):
-    __tablename__ = "quizzes"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
-    title: Mapped[str] = mapped_column(String(160))
-    questions_json: Mapped[str] = mapped_column(Text)
-    score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    course: Mapped[Course] = relationship(back_populates="quizzes")
-
-
-class StudySession(Base):
-    __tablename__ = "study_sessions"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    course_id: Mapped[int | None] = mapped_column(ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
-    minutes: Mapped[int] = mapped_column(Integer)
-    studied_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-
-class ChatSession(Base):
-    __tablename__ = "chat_sessions"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), index=True)
-    title: Mapped[str] = mapped_column(String(160))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    messages: Mapped[list[ChatMessage]] = relationship(back_populates="session", cascade="all, delete-orphan")
-
-
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True)
-    role: Mapped[str] = mapped_column(String(12))
-    content: Mapped[str] = mapped_column(Text)
-    citations_json: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    session: Mapped[ChatSession] = relationship(back_populates="messages")
-
-
-class RegisterInput(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
-
-
-class LoginInput(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class CourseInput(BaseModel):
-    code: str = Field(min_length=1, max_length=30)
-    title: str = Field(min_length=1, max_length=160)
-    color: str = "#2e7966"
-
-
-class StudentProfileInput(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    father_name: str = Field(default="", max_length=120)
-    mother_name: str = Field(default="", max_length=120)
-    phone: str = Field(default="", max_length=40)
-    location: str = Field(default="", max_length=160)
-    education_level: str = Field(default="", max_length=40)
-    school_name: str = Field(default="", max_length=160)
-    school_qualification: str = Field(default="", max_length=120)
-    school_start_year: int | None = Field(default=None, ge=1900, le=2200)
-    school_passout_year: int | None = Field(default=None, ge=1900, le=2200)
-    college_name: str = Field(default="", max_length=160)
-    college_program: str = Field(default="", max_length=120)
-    college_start_year: int | None = Field(default=None, ge=1900, le=2200)
-    college_passout_year: int | None = Field(default=None, ge=1900, le=2200)
-    institution: str = Field(default="", max_length=160)
-    university_department: str = Field(default="", max_length=160)
-    field_of_study: str = Field(default="", max_length=120)
-    university_start_year: int | None = Field(default=None, ge=1900, le=2200)
-    current_year: str = Field(default="", max_length=80)
-    expected_graduation_year: int | None = Field(default=None, ge=1900, le=2200)
-
-
-class TaskInput(BaseModel):
-    title: str = Field(min_length=1, max_length=240)
-    due_date: datetime
-    course_id: int | None = None
-    status: str = "TODO"
-    priority: str = "MEDIUM"
-
-
-class TaskUpdate(BaseModel):
-    status: str | None = None
-    title: str | None = None
-
-
-class ChatInput(BaseModel):
-    question: str = Field(min_length=1, max_length=2000)
-    session_id: int | None = None
-
-
-class ChatTurnInput(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str = Field(max_length=8000)
-
-
-class GeneralChatInput(BaseModel):
-    question: str = Field(min_length=1, max_length=2000)
-    course_id: int | None = None
-    history: list[ChatTurnInput] = Field(default_factory=list, max_length=12)
-
-
-class StudyInput(BaseModel):
-    minutes: int = Field(gt=0, le=1440)
-    course_id: int | None = None
-
-
-class StudySourcesInput(BaseModel):
-    document_ids: list[int] | None = None
-
-
-class QuizSubmission(BaseModel):
-    answers: list[int]
-
-
-class PlanInput(BaseModel):
-    course_id: int
-    exam_date: date
-    hours_per_day: float = Field(gt=0, le=8)
-
-
-class Model(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
+from .models import Base, ChatMessage, ChatSession, Course, CourseDocument, FlashcardDeck, Quiz, StudentProfile, StudySession, Task, User
+from .schemas import ChatInput, ChatTurnInput, CourseInput, GeneralChatInput, LoginInput, PlanInput, QuizSubmission, RegisterInput, StudentProfileInput, StudyInput, StudySourcesInput, TaskInput, TaskUpdate
 
 app = FastAPI(title="Z-Top API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=[FRONTEND_ORIGIN, "http://127.0.0.1:3000"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -356,68 +132,6 @@ def _task_json(task: Task) -> dict[str, Any]:
 
 def _course_json(course: Course) -> dict[str, Any]:
     return {"id": course.id, "code": course.code, "title": course.title, "color": course.color, "documents": [{"id": d.id, "fileName": d.file_name, "uploadedAt": d.uploaded_at.isoformat()} for d in course.documents], "deckCount": len(course.decks), "quizCount": len(course.quizzes)}
-
-
-def _extract(file_name: str, data: bytes) -> list[tuple[int, str]]:
-    suffix = Path(file_name).suffix.lower()
-    if suffix in IMAGE_EXTENSIONS:
-        return [(1, _ocr_image(data))]
-    if suffix == ".pdf":
-        reader = PdfReader(__import__("io").BytesIO(data))
-        pages: list[tuple[int, str]] = []
-        pdf = fitz.open(stream=data, filetype="pdf")
-        for index, page in enumerate(reader.pages):
-            text = page.extract_text() or ""
-            if not text.strip():
-                rendered = pdf[index].get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False).tobytes("png")
-                text = _ocr_image(rendered)
-            pages.append((index + 1, text))
-        pdf.close()
-        return pages
-    if suffix == ".docx":
-        document = WordDocument(__import__("io").BytesIO(data))
-        return [(1, "\n".join(p.text for p in document.paragraphs))]
-    if suffix in {".txt", ".md"}:
-        return [(1, data.decode("utf-8", errors="replace"))]
-    raise HTTPException(status_code=415, detail="Upload a PDF, DOCX, TXT, or Markdown file")
-
-
-def _ocr_image(data: bytes) -> str:
-    executable = shutil.which("tesseract")
-    if executable is None:
-        for candidate in (
-            Path(os.getenv("PROGRAMFILES", "")) / "Tesseract-OCR" / "tesseract.exe",
-            Path(os.getenv("PROGRAMFILES(X86)", "")) / "Tesseract-OCR" / "tesseract.exe",
-        ):
-            if candidate.exists():
-                executable = str(candidate)
-                break
-    if executable is None:
-        raise HTTPException(
-            status_code=503,
-            detail="OCR is not installed. Install Tesseract OCR, then restart the backend.",
-        )
-    pytesseract.pytesseract.tesseract_cmd = executable
-    try:
-        with Image.open(io.BytesIO(data)) as image:
-            return pytesseract.image_to_string(image).strip()
-    except Exception as error:
-        logger.exception("OCR failed")
-        raise HTTPException(status_code=422, detail="The image could not be read by OCR") from error
-
-
-def _chunks(pages: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    result: list[tuple[int, str]] = []
-    for page, text in pages:
-        clean = re.sub(r"\s+", " ", text).strip()
-        start = 0
-        while start < len(clean):
-            end = min(start + 1000, len(clean))
-            result.append((page, clean[start:end]))
-            if end == len(clean):
-                break
-            start = max(start + 1, end - 200)
-    return result
 
 
 @app.get("/api/health")
@@ -808,7 +522,7 @@ def grounded_chat(course_id: int, payload: ChatInput, user: User = Depends(curre
                 answer = generated["answer"]
                 citations = [sources[index - 1] for index in generated["sourceIndexes"]]
             except Exception:
-                logger.exception("Gemini answer generation failed for course %s", course.id)
+                logger.exception("Groq answer generation failed for course %s", course.id)
                 answer = "I found a few passages that may help, but couldn't put together a full answer just now. Here are the relevant excerpts."
                 citations = sources
         else:
@@ -837,7 +551,7 @@ def list_chat_messages(session_id: int, user: User = Depends(current_user), db: 
 @app.post("/api/general-chats")
 def general_chat(payload: GeneralChatInput, user: User = Depends(current_user), db: Session = Depends(get_db)):
     if not ai.groq_ready():
-        raise HTTPException(status_code=503, detail="General Z-Chat needs a Gemini API key. Add GEMINI_API_KEY to backend/.env and restart the API.")
+        raise HTTPException(status_code=503, detail="General Z-Chat needs a Groq API key. Add GROQ_API_KEY to backend/.env and restart the API.")
     course_sources: list[dict[str, Any]] = []
     if payload.course_id is not None:
         course = _course(db, payload.course_id, user.id)
@@ -846,18 +560,18 @@ def general_chat(payload: GeneralChatInput, user: User = Depends(current_user), 
     try:
         result = ai.general_answer(payload.question.strip(), history, course_sources)
     except Exception as error:
-        logger.exception("Gemini general chat failed for user %s", user.id)
+        logger.exception("Groq general chat failed for user %s", user.id)
         if getattr(error, "code", None) == 429:
             raise HTTPException(
                 status_code=429,
-                detail="Gemini API quota or rate limit is exhausted. Check your Google AI Studio usage and billing, or retry after the quota resets.",
+                detail="Groq API quota or rate limit is exhausted. Check your Groq account and billing, or retry after the quota resets.",
             ) from error
         if getattr(error, "code", None) == 503:
             raise HTTPException(
                 status_code=503,
-                detail="Gemini is temporarily unavailable. Please try again shortly.",
+                detail="Groq is temporarily unavailable. Please try again shortly.",
             ) from error
-        raise HTTPException(status_code=502, detail="Z-Chat couldn't reach Gemini just now. Please try again.") from error
+        raise HTTPException(status_code=502, detail="Z-Chat couldn't reach Groq just now. Please try again.") from error
     return {"answer": result["answer"], "citations": result["citations"], "grounded": bool(course_sources)}
 
 

@@ -14,7 +14,7 @@ from openai import OpenAI
 from qdrant_client import QdrantClient, models
 
 VECTOR_SIZE = 768
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env", override=False)
 COLLECTION = os.getenv("QDRANT_COLLECTION", "z_top_course_chunks")
 _client: genai.Client | None = None
