@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ COLLECTION = os.getenv("QDRANT_COLLECTION", "z_top_course_chunks")
 _client: genai.Client | None = None
 _groq_client: OpenAI | None = None
 _vectors: QdrantClient | None = None
+RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
 
 
 class AIUnavailable(RuntimeError):
@@ -77,7 +79,15 @@ def _groq_completion(prompt: str, *, system: str | None = None, json_mode: bool 
     }
     if json_mode and os.getenv("GROQ_NATIVE_JSON", "").lower() == "true":
         kwargs["response_format"] = {"type": "json_object"}
-    response = _groq().chat.completions.create(**kwargs)
+    for attempt in range(3):
+        try:
+            response = _groq().chat.completions.create(**kwargs)
+            break
+        except Exception as error:
+            status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
+            if attempt == 2 or status_code not in RETRYABLE_STATUS_CODES:
+                raise
+            time.sleep(2**attempt)
     content = response.choices[0].message.content if response.choices else None
     if not content:
         raise AIUnavailable("Groq returned an empty response")
@@ -102,11 +112,19 @@ def _qdrant() -> QdrantClient:
 def embed(texts: list[str], task_type: str) -> list[list[float]]:
     if not texts:
         return []
-    result = _gemini().models.embed_content(
-        model=os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001"),
-        contents=texts,
-        config=types.EmbedContentConfig(task_type=task_type, output_dimensionality=VECTOR_SIZE),
-    )
+    for attempt in range(3):
+        try:
+            result = _gemini().models.embed_content(
+                model=os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001"),
+                contents=texts,
+                config=types.EmbedContentConfig(task_type=task_type, output_dimensionality=VECTOR_SIZE),
+            )
+            break
+        except Exception as error:
+            status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
+            if attempt == 2 or status_code not in RETRYABLE_STATUS_CODES:
+                raise
+            time.sleep(2**attempt)
     if not result.embeddings:
         raise AIUnavailable("Gemini returned no embeddings")
     return [list(item.values or []) for item in result.embeddings]
