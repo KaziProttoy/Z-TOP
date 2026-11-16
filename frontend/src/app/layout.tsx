@@ -5,6 +5,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Z-Top | Your academic co-pilot",
   description: "A focused workspace for course materials, study tools, and academic planning.",
+  icons: {
+    icon: "/z-top-logo.png",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

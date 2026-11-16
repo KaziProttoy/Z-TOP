@@ -32,150 +32,11 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-type User = { id: number; name: string; email: string };
-type StudentProfile = {
-  name: string;
-  email: string;
-  photoAvailable: boolean;
-  fatherName: string;
-  motherName: string;
-  phone: string;
-  location: string;
-  educationLevel: string;
-  schoolName: string;
-  schoolQualification: string;
-  schoolStartYear: number | null;
-  schoolPassoutYear: number | null;
-  collegeName: string;
-  collegeProgram: string;
-  collegeStartYear: number | null;
-  collegePassoutYear: number | null;
-  institution: string;
-  universityDepartment: string;
-  fieldOfStudy: string;
-  universityStartYear: number | null;
-  currentYear: string;
-  expectedGraduationYear: number | null;
-};
-type Doc = {
-  id: number;
-  fileName: string;
-  uploadedAt: string;
-  characters?: number;
-};
-type ReaderMaterial = {
-  id: number;
-  fileName: string;
-  pages: { number: number; text: string }[];
-};
-type OriginalFile = { url: string; contentType: string };
-type Course = {
-  id: number;
-  code: string;
-  title: string;
-  color: string;
-  documents: Doc[];
-  deckCount: number;
-  quizCount: number;
-};
-type Task = {
-  id: number;
-  title: string;
-  dueDate: string;
-  status: "TODO" | "IN_PROGRESS" | "COMPLETED";
-  priority: "LOW" | "MEDIUM" | "HIGH";
-  courseId: number | null;
-};
-type Data = {
-  courses: Course[];
-  tasks: Task[];
-  stats: {
-    courseCount: number;
-    openTasks: number;
-    studyMinutes: number;
-    documents: number;
-  };
-};
-type Citation = {
-  fileName?: string;
-  page?: number;
-  snippet?: string;
-  title?: string;
-  url?: string;
-  sourceType?: "course" | "web";
-};
-type Message = {
-  role: "user" | "assistant";
-  text: string;
-  citations?: Citation[];
-};
-type Asset = {
-  id?: number;
-  title?: string;
-  topic?: string;
-  cards?: { question: string; answer: string }[];
-  questions?: {
-    question: string;
-    options: string[];
-    correctIndex: number;
-    explanation: string;
-  }[];
-};
-type QuizResult = {
-  score: number;
-  correct: number;
-  total: number;
-  results: { isCorrect: boolean; correctIndex: number; explanation: string }[];
-};
-type Analytics = {
-  courses: {
-    id: number;
-    code: string;
-    title: string;
-    averageScore: number | null;
-    quizAttempts: number;
-    studyMinutes: number;
-  }[];
-  streakDays: number;
-  studyMinutesTotal: number;
-  studyMinutesWeek: number;
-  dailyStudy: { date: string; minutes: number }[];
-};
-type View =
-  "Overview" | "Courses" | "Z-Chat" | "Z-Study" | "Planner" | "Progress" | "Profile";
-
-async function api<T>(
-  path: string,
-  token: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const headers = new Headers(options.headers);
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (options.body && !(options.body instanceof FormData))
-    headers.set("Content-Type", "application/json");
-  const response = await fetch(`${API}${path}`, { ...options, headers });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(body.detail ?? "The request could not be completed.");
-  return body as T;
-}
-
-async function apiFile(path: string, token: string): Promise<OriginalFile> {
-  const response = await fetch(`${API}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail ?? "The original file could not be opened.");
-  }
-  return {
-    url: URL.createObjectURL(await response.blob()),
-    contentType: response.headers.get("Content-Type") ?? "",
-  };
-}
+import { api, apiFile } from '@/lib/api';
+import type { Analytics, Asset, Citation, Course, Data, Doc, Message, OriginalFile, QuizResult, ReaderMaterial, StudentProfile, Task, User, View } from '@/lib/types';
 
 const nav: { label: View; icon: typeof LayoutDashboard }[] = [
   { label: "Overview", icon: LayoutDashboard },
@@ -198,6 +59,8 @@ const formatDuration = (totalSeconds: number) => {
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
+const displayAssistantText = (text: string) =>
+  text.replace(/^\s*\*{0,2}Answer:\*{0,2}\s*/i, "");
 
 export default function Home() {
   const [token, setToken] = useState("");
@@ -824,9 +687,7 @@ export default function Home() {
   if (!ready)
     return (
       <main className="boot-screen">
-        <span className="brand-mark">
-          <GraduationCap size={22} />
-        </span>
+        <Image className="brand-logo brand-logo-loading" src="/z-top-logo.png" alt="Z-TOP" width={120} height={48} priority />
         <LoaderCircle className="spin" size={18} />
       </main>
     );
@@ -836,8 +697,7 @@ export default function Home() {
       <main className="auth-page">
         <header className="auth-nav">
           <a className="auth-logo" href="#home" aria-label="Z-Top home">
-            <span className="auth-logo-mark">Z</span>
-            <span>Z-TOP</span>
+            <Image className="brand-logo brand-logo-auth" src="/z-top-logo.png" alt="Z-TOP" width={120} height={48} priority />
           </a>
           <div className="auth-nav-actions">
             <button className="auth-help" onClick={() => setHelpOpen(true)}>Help</button>
@@ -969,12 +829,7 @@ export default function Home() {
     <div className="app-shell">
       <aside className="sidebar">
         <a className="wordmark" href="#home">
-          <span className="brand-mark">
-            <GraduationCap size={20} />
-          </span>
-          <span>
-            z-top<span className="wordmark-dot">.</span>
-          </span>
+          <Image className="brand-logo brand-logo-sidebar" src="/z-top-logo.png" alt="Z-TOP" width={120} height={48} priority />
         </a>
         <div className="workspace-label">YOUR WORKSPACE</div>
         <nav className="main-nav" aria-label="Main navigation">
@@ -1175,7 +1030,7 @@ export default function Home() {
                         <p className="eyebrow">STUDENT DOSSIER</p>
                         <h1>{studentProfile.name}</h1>
                         <p className="dossier-subtitle">
-                          {[studentProfile.fieldOfStudy, studentProfile.institution].filter(Boolean).join(" • ") || "Student profile"}
+                          {[studentProfile.fieldOfStudy, studentProfile.institution].filter(Boolean).join(" â€¢ ") || "Student profile"}
                         </p>
                         {(studentProfile.educationLevel || studentProfile.currentYear || studentProfile.expectedGraduationYear) && (
                           <div className="dossier-meta">
@@ -1209,7 +1064,7 @@ export default function Home() {
                                 <h3>{entry.institution}</h3>
                                 <span>
                                   {entry.startYear && entry.passoutYear
-                                    ? `${entry.startYear}–${entry.level === "University" ? "Expected " : ""}${entry.passoutYear}`
+                                    ? `${entry.startYear}â€“${entry.level === "University" ? "Expected " : ""}${entry.passoutYear}`
                                     : entry.passoutYear
                                       ? `${entry.yearLabel} ${entry.passoutYear}`
                                       : entry.startYear
@@ -1217,7 +1072,7 @@ export default function Home() {
                                         : entry.level}
                                 </span>
                               </div>
-                              <p>{[entry.level, entry.primary, entry.secondary].filter(Boolean).join(" • ")}</p>
+                              <p>{[entry.level, entry.primary, entry.secondary].filter(Boolean).join(" â€¢ ")}</p>
                               {(entry.primary || entry.secondary || (entry.level === "University" && studentProfile.currentYear)) && (
                                 <div className="dossier-academic-facts">
                                   {entry.primary && (
@@ -1365,7 +1220,7 @@ export default function Home() {
                         <label className="profile-field">
                           <span>Account email</span>
                           <input type="email" value={studentProfile.email} readOnly />
-                          <small>Your sign-in email can’t be changed here.</small>
+                          <small>Your sign-in email canâ€™t be changed here.</small>
                         </label>
                         <label className="profile-field">
                           <span>Father&apos;s name <small>Optional</small></span>
@@ -1824,13 +1679,17 @@ export default function Home() {
                       >
                         <div className="message-avatar">
                           {message.role === "assistant" ? (
-                            <Sparkles size={15} />
+                            <Image src="/z-top-logo.png" alt="Z-TOP assistant" width={26} height={26} />
                           ) : (
                             user.name.slice(0, 1).toUpperCase()
                           )}
                         </div>
                         <div className="message-body">
-                          <p>{message.text}</p>
+                          <p>
+                            {message.role === "assistant"
+                              ? displayAssistantText(message.text)
+                              : message.text}
+                          </p>
                           {message.citations?.map((citation, i) => citation.url ? (
                             <article className="citation citation-web" key={`${citation.url}-${i}`}>
                               <div><Globe2 size={14} /><strong>Web source</strong></div>
@@ -1848,9 +1707,11 @@ export default function Home() {
                   )}
                   {chatSending && (
                     <div className="message message-assistant chat-thinking" role="status" aria-live="polite">
-                      <div className="message-avatar"><Sparkles size={15} /></div>
+                      <div className="message-avatar">
+                        <Image src="/z-top-logo.png" alt="Z-TOP assistant" width={26} height={26} />
+                      </div>
                       <div className="message-body">
-                        <p><LoaderCircle className="spin" size={14} /> {chatCourse ? "Checking your notes and searching the web…" : "Thinking…"}</p>
+                        <p><LoaderCircle className="spin" size={14} /> {chatCourse ? "Checking your notes and searching the webâ€¦" : "Thinkingâ€¦"}</p>
                       </div>
                     </div>
                   )}
@@ -1859,7 +1720,7 @@ export default function Home() {
                   <input
                     value={question}
                     onChange={(event) => setQuestion(event.target.value)}
-                    placeholder="Ask Z-Chat anything…"
+                    placeholder="Ask Z-Chat anythingâ€¦"
                     aria-label="Ask Z-Chat a question"
                     disabled={chatSending}
                   />
@@ -2188,7 +2049,7 @@ export default function Home() {
                         <div><strong>{item.code}</strong><span>{item.title}</span></div>
                         <div className="mastery-meter"><span style={{ width: `${item.averageScore ?? 0}%` }} /></div>
                         <strong className="mastery-score">{item.averageScore === null ? "-" : `${Math.round(item.averageScore)}%`}</strong>
-                        <small>{item.quizAttempts} quizzes · {item.studyMinutes} study min</small>
+                        <small>{item.quizAttempts} quizzes Â· {item.studyMinutes} study min</small>
                       </article>
                     ))}
                     {!analytics?.courses.length && <p className="muted analytics-empty">Add a course to start tracking study activity.</p>}
