@@ -84,6 +84,14 @@ Do not copy the example domain names above as real settings. Replace them with t
 
 ### Optional local development
 
+On Windows, start both the backend and frontend with:
+
+```powershell
+.\start-dev.ps1
+```
+
+The launcher starts only services that are not already running.
+
 Localhost is only for development on your own computer; it is not the public website address. If you or another developer later need to run the project locally, use the commands below.
 
 **Backend (from the repository root):**
