@@ -190,7 +190,7 @@ def _student_profile_json(user: User, profile: StudentProfile | None) -> dict[st
     return {
         "name": user.name,
         "email": user.email,
-        "photoAvailable": _student_photo_path(user.id) is not None,
+        "photoAvailable": _student_photo_available(user.id),
         "fatherName": profile.father_name if profile else "",
         "motherName": profile.mother_name if profile else "",
         "phone": profile.phone if profile else "",
@@ -219,6 +219,17 @@ def _student_photo_path(user_id: int) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+def _student_photo_available(user_id: int) -> bool:
+    if storage.configured():
+        for extension in IMAGE_EXTENSIONS:
+            try:
+                storage.download(_storage_path("profile-photos", user_id, extension))
+                return True
+            except Exception:
+                continue
+    return _student_photo_path(user_id) is not None
 
 
 def _storage_path(kind: str, identifier: int, suffix: str) -> str:
