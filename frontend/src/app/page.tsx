@@ -193,6 +193,7 @@ export default function Home() {
     if (!token) return;
     let cancelled = false;
     const loadProfilePhoto = async () => {
+      setProfilePhotoUrl(null);
       try {
         const profile = await api<StudentProfile>("/api/profile", token);
         if (cancelled || !profile.photoAvailable) return;
