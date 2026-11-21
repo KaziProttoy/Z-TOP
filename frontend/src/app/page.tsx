@@ -69,6 +69,7 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [view, setView] = useState<View>("Overview");
   const [courseId, setCourseId] = useState<number | "">("");
+  const [courseDetailId, setCourseDetailId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
@@ -277,6 +278,7 @@ export default function Home() {
         body: JSON.stringify({ code: courseCode, title: courseTitle }),
       });
       setCourseId(course.id);
+      setCourseDetailId(null);
       setCourseCode("");
       setCourseTitle("");
       setCourseModal(false);
@@ -450,6 +452,7 @@ export default function Home() {
 
   function openView(nextView: View) {
     setView(nextView);
+    if (nextView === "Courses") setCourseDetailId(null);
     if (nextView === "Progress") void loadAnalytics();
     if (nextView === "Z-Chat") startNewChat();
   }
@@ -777,6 +780,7 @@ export default function Home() {
   const courses = data?.courses ?? [];
   const tasks = data?.tasks ?? [];
   const course = courses.find((item) => item.id === courseId);
+  const courseDetail = courses.find((item) => item.id === courseDetailId);
   const chatCourse = courses.find((item) => item.id === chatCourseId);
   const selectedStudyDocumentIds = course
     ? studyDocumentSelection && studyDocumentSelection.courseId === course.id
@@ -865,6 +869,7 @@ export default function Home() {
               className={`course-nav ${courseId === item.id ? "chosen" : ""}`}
               onClick={() => {
                 setCourseId(item.id);
+                setCourseDetailId(item.id);
                 setView("Courses");
               }}
             >
@@ -1494,6 +1499,7 @@ export default function Home() {
                   courses={courses.slice(0, 3)}
                   onChoose={(id) => {
                     setCourseId(id);
+                    setCourseDetailId(id);
                     setView("Courses");
                   }}
                   onAdd={() => setCourseModal(true)}
@@ -1505,29 +1511,38 @@ export default function Home() {
           {view === "Courses" && (
             <section className="page-section">
               <PageTitle
-                eyebrow="YOUR MATERIALS, TOGETHER"
-                title="Course spaces"
-                body="Keep your notes close to the work they support."
+                eyebrow={courseDetail ? courseDetail.code : "YOUR MATERIALS, TOGETHER"}
+                title={courseDetail ? courseDetail.title : "Course spaces"}
+                body={
+                  courseDetail
+                    ? "Study materials and files for this course."
+                    : "Keep your notes close to the work they support."
+                }
               >
-                <button
-                  className="button button-dark"
-                  onClick={() => setCourseModal(true)}
-                >
-                  <Plus size={16} />
-                  New course
-                </button>
+                {courseDetail ? (
+                  <button
+                    className="button button-outline"
+                    onClick={() => setCourseDetailId(null)}
+                  >
+                    <ArrowDownLeft size={16} />
+                    All courses
+                  </button>
+                ) : (
+                  <button
+                    className="button button-dark"
+                    onClick={() => setCourseModal(true)}
+                  >
+                    <Plus size={16} />
+                    New course
+                  </button>
+                )}
               </PageTitle>
-              <CourseGrid
-                courses={courses}
-                onChoose={setCourseId}
-                onAdd={() => setCourseModal(true)}
-              />
-              {course && (
+              {courseDetail ? (
                 <section className="panel course-detail">
                   <div className="panel-heading">
                     <div>
-                      <p className="eyebrow">{course.code}</p>
-                      <h2>{course.title}</h2>
+                      <p className="eyebrow">COURSE MATERIALS</p>
+                      <h2>Study materials</h2>
                     </div>
                     <label className="button button-outline upload-label">
                       <Upload size={16} />
@@ -1549,8 +1564,8 @@ export default function Home() {
                     </label>
                   </div>
                   <div className="document-list">
-                    {course.documents.length ? (
-                      course.documents.map((doc) => (
+                    {courseDetail.documents.length ? (
+                      courseDetail.documents.map((doc) => (
                         <div className="document-row" key={doc.id}>
                           <button
                             className="document-open"
@@ -1605,6 +1620,15 @@ export default function Home() {
                     onChange={(event) => upload(event.target.files?.[0])}
                   />
                 </section>
+              ) : (
+                <CourseGrid
+                  courses={courses}
+                  onChoose={(id) => {
+                    setCourseId(id);
+                    setCourseDetailId(id);
+                  }}
+                  onAdd={() => setCourseModal(true)}
+                />
               )}
             </section>
           )}
