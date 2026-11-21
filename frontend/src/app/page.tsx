@@ -721,7 +721,7 @@ export default function Home() {
                 )}
                 <label className="auth-field">
                   <span>Email address</span>
-                  <input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@university.edu" />
+                  <input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@gmail.com" />
                 </label>
                 <label className="auth-field">
                   <span>Password</span>
@@ -741,7 +741,7 @@ export default function Home() {
                 {error && <p className="form-error">{error}</p>}
                 <button className="button auth-submit" disabled={busy}>
                   {busy && <LoaderCircle className="spin" size={17} />}
-                  {authMode === "register" ? "Create account" : "Sign In"}
+                  {authMode === "register" ? "Create account" : "Log In"}
                   {!busy && <ArrowUpRight size={16} />}
                 </button>
               </form>
@@ -1886,7 +1886,7 @@ export default function Home() {
                       </div>
                       <p className="eyebrow">YOUR STUDY SET WILL APPEAR HERE</p>
                       <h3>Practice beats rereading.</h3>
-                      <p className="muted">
+                      <p className=" muted">
                         Create a set from your notes, then work through it at
                         your own pace.
                       </p>
