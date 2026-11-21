@@ -2,6 +2,7 @@
 
 import {
   ArrowDownLeft,
+  ArrowLeft,
   ArrowUpRight,
   BarChart3,
   BookOpen,
@@ -21,11 +22,13 @@ import {
   LayoutDashboard,
   LoaderCircle,
   LogOut,
+  Moon,
   MessageSquareText,
   Pencil,
   Plus,
   Send,
   Sparkles,
+  Sun,
   Trash2,
   Upload,
   UserRound,
@@ -67,6 +70,9 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [data, setData] = useState<Data | null>(null);
   const [ready, setReady] = useState(false);
+  const [darkMode, setDarkMode] = useState(() =>
+    typeof window !== "undefined" && localStorage.getItem("z-top-dark-mode") === "true",
+  );
   const [view, setView] = useState<View>("Overview");
   const [courseId, setCourseId] = useState<number | "">("");
   const [courseDetailId, setCourseDetailId] = useState<number | null>(null);
@@ -118,6 +124,10 @@ export default function Home() {
     documentIds: number[];
   } | null>(null);
   const [draggedTaskId, setDraggedTaskId] = useState<number | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem("z-top-dark-mode", String(darkMode));
+  }, [darkMode]);
 
   async function refresh(authToken = token) {
     const result = await api<Data>("/api/dashboard", authToken);
@@ -691,19 +701,28 @@ export default function Home() {
   if (!ready)
     return (
       <main className="boot-screen">
-        <Image className="brand-logo brand-logo-loading" src="/z-top-logo.png" alt="Z-TOP" width={120} height={48} priority />
+        <Image className="brand-logo brand-logo-loading" src="/z-top-logo-purple.png" alt="Z-TOP" width={120} height={48} priority />
         <LoaderCircle className="spin" size={18} />
       </main>
     );
 
   if (!user)
     return (
-      <main className="auth-page">
+      <main className={`auth-page ${darkMode ? "dark-mode" : ""}`}>
         <header className="auth-nav">
           <a className="auth-logo" href="#home" aria-label="Z-Top home">
-            <Image className="brand-logo brand-logo-auth" src="/z-top-logo.png" alt="Z-TOP" width={120} height={48} priority />
+            <Image className="brand-logo brand-logo-auth" src="/z-top-logo-purple.png" alt="Z-TOP" width={120} height={48} priority />
           </a>
           <div className="auth-nav-actions">
+            <button
+              className="theme-toggle"
+              type="button"
+              onClick={() => setDarkMode((enabled) => !enabled)}
+              aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+              title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
             <button className="auth-help" onClick={() => setHelpOpen(true)}>Help</button>
             <button className="auth-signup" onClick={() => { setAuthMode(authMode === "register" ? "login" : "register"); setError(""); }}>
               {authMode === "register" ? "Sign In" : "Sign Up"}
@@ -831,10 +850,10 @@ export default function Home() {
     : null;
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${view !== "Overview" ? "feature-mode" : ""} ${darkMode ? "dark-mode" : ""}`}>
       <aside className="sidebar">
         <a className="wordmark" href="#home">
-          <Image className="brand-logo brand-logo-sidebar" src="/z-top-logo.png" alt="Z-TOP" width={120} height={48} priority />
+          <Image className="brand-logo brand-logo-sidebar" src="/z-top-logo-purple.png" alt="Z-TOP" width={150} height={60} priority />
         </a>
         <div className="workspace-label">YOUR WORKSPACE</div>
         <nav className="main-nav" aria-label="Main navigation">
@@ -852,36 +871,6 @@ export default function Home() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-course-head">
-          <span>YOUR COURSES</span>
-          <button
-            title="Add course"
-            aria-label="Add course"
-            onClick={() => setCourseModal(true)}
-          >
-            <Plus size={16} />
-          </button>
-        </div>
-        <div className="course-nav-list">
-          {courses.map((item) => (
-            <button
-              key={item.id}
-              className={`course-nav ${courseId === item.id ? "chosen" : ""}`}
-              onClick={() => {
-                setCourseId(item.id);
-                setCourseDetailId(item.id);
-                setView("Courses");
-              }}
-            >
-              <span className="course-dot" style={{ background: item.color }} />
-              {item.code}
-              <span className="course-nav-title">{item.title}</span>
-            </button>
-          ))}
-          {!courses.length && (
-            <p className="sidebar-empty">Your courses will show up here.</p>
-          )}
-        </div>
         <div className="sidebar-bottom">
           <div className="side-tip">
             <Clock3 size={17} />
@@ -915,9 +904,28 @@ export default function Home() {
       <main className="main-area">
         <header className="topbar">
           <div className="breadcrumb">
+            {view !== "Overview" && (
+              <button
+                className="back-to-overview"
+                type="button"
+                onClick={() => openView("Overview")}
+              >
+                <ArrowLeft size={14} />
+                Back
+              </button>
+            )}
             Workspace <span>/</span> <strong>{view}</strong>
           </div>
           <div className="topbar-right">
+            <button
+              className="theme-toggle"
+              type="button"
+              onClick={() => setDarkMode((enabled) => !enabled)}
+              aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+              title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
             <span className="today-label">
               <Clock3 size={15} />
               {today}
@@ -1704,7 +1712,7 @@ export default function Home() {
                       >
                         <div className="message-avatar">
                           {message.role === "assistant" ? (
-                            <Image src="/z-top-logo.png" alt="Z-TOP assistant" width={26} height={26} />
+                            <Image src="/z-top-logo-purple.png" alt="Z-TOP assistant" width={26} height={26} />
                           ) : (
                             user.name.slice(0, 1).toUpperCase()
                           )}
@@ -1733,7 +1741,7 @@ export default function Home() {
                   {chatSending && (
                     <div className="message message-assistant chat-thinking" role="status" aria-live="polite">
                       <div className="message-avatar">
-                        <Image src="/z-top-logo.png" alt="Z-TOP assistant" width={26} height={26} />
+                        <Image src="/z-top-logo-purple.png" alt="Z-TOP assistant" width={26} height={26} />
                       </div>
                       <div className="message-body">
                         <p><LoaderCircle className="spin" size={14} /> {chatCourse ? "Checking your notes and searching the webâ€¦" : "Thinkingâ€¦"}</p>
