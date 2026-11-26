@@ -71,6 +71,7 @@ class ChatTurnInput(BaseModel):
 class GeneralChatInput(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     course_id: int | None = None
+    document_ids: list[int] | None = None
     history: list[ChatTurnInput] = Field(default_factory=list, max_length=12)
 
 

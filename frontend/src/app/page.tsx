@@ -63,7 +63,7 @@ const formatDuration = (totalSeconds: number) => {
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
 const displayAssistantText = (text: string) =>
-  text.replace(/^\s*\*{0,2}Answer:\*{0,2}\s*/i, "");
+  text.replace(/^\s*\*{0,2}Answer:\*{0,2}\s*/i, "").replace(/\*\*/g, "");
 
 export default function Home() {
   const [token, setToken] = useState("");
@@ -114,6 +114,10 @@ export default function Home() {
   const [chatSending, setChatSending] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatCourseId, setChatCourseId] = useState<number | "">("");
+  const [chatDocumentSelection, setChatDocumentSelection] = useState<{
+    courseId: number;
+    documentIds: number[];
+  } | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [asset, setAsset] = useState<Asset | null>(null);
   const [studyMode, setStudyMode] = useState<"flashcards" | "quiz" | "summary">(
@@ -379,6 +383,7 @@ export default function Home() {
         body: JSON.stringify({
           question: text,
           course_id: chatCourseId || null,
+          document_ids: chatCourse?.documents.length ? effectiveChatDocumentIds : null,
           history: messages.slice(-12).map((message) => ({ role: message.role, content: message.text })),
         }),
       });
@@ -801,6 +806,14 @@ export default function Home() {
   const course = courses.find((item) => item.id === courseId);
   const courseDetail = courses.find((item) => item.id === courseDetailId);
   const chatCourse = courses.find((item) => item.id === chatCourseId);
+  const selectedChatDocumentIds = chatCourse
+    ? chatDocumentSelection?.courseId === chatCourse.id
+      ? chatDocumentSelection.documentIds.filter((id) => chatCourse.documents.some((doc) => doc.id === id))
+      : chatCourse.documents.map((doc) => doc.id)
+    : [];
+  const effectiveChatDocumentIds = selectedChatDocumentIds.length
+    ? selectedChatDocumentIds
+    : chatCourse?.documents.map((doc) => doc.id) ?? [];
   const selectedStudyDocumentIds = course
     ? studyDocumentSelection && studyDocumentSelection.courseId === course.id
       ? studyDocumentSelection.documentIds.filter((id) => course.documents.some((doc) => doc.id === id))
@@ -1044,7 +1057,7 @@ export default function Home() {
                         <p className="eyebrow">STUDENT DOSSIER</p>
                         <h1>{studentProfile.name}</h1>
                         <p className="dossier-subtitle">
-                          {[studentProfile.fieldOfStudy, studentProfile.institution].filter(Boolean).join(" â€¢ ") || "Student profile"}
+                          {[studentProfile.fieldOfStudy, studentProfile.institution].filter(Boolean).join(" • ") || "Student profile"}
                         </p>
                         {(studentProfile.educationLevel || studentProfile.currentYear || studentProfile.expectedGraduationYear) && (
                           <div className="dossier-meta">
@@ -1078,7 +1091,7 @@ export default function Home() {
                                 <h3>{entry.institution}</h3>
                                 <span>
                                   {entry.startYear && entry.passoutYear
-                                    ? `${entry.startYear}â€“${entry.level === "University" ? "Expected " : ""}${entry.passoutYear}`
+                                    ? `${entry.startYear}–${entry.level === "University" ? "Expected " : ""}${entry.passoutYear}`
                                     : entry.passoutYear
                                       ? `${entry.yearLabel} ${entry.passoutYear}`
                                       : entry.startYear
@@ -1086,7 +1099,7 @@ export default function Home() {
                                         : entry.level}
                                 </span>
                               </div>
-                              <p>{[entry.level, entry.primary, entry.secondary].filter(Boolean).join(" â€¢ ")}</p>
+                              <p>{[entry.level, entry.primary, entry.secondary].filter(Boolean).join(" • ")}</p>
                               {(entry.primary || entry.secondary || (entry.level === "University" && studentProfile.currentYear)) && (
                                 <div className="dossier-academic-facts">
                                   {entry.primary && (
@@ -1234,7 +1247,7 @@ export default function Home() {
                         <label className="profile-field">
                           <span>Account email</span>
                           <input type="email" value={studentProfile.email} readOnly />
-                          <small>Your sign-in email canâ€™t be changed here.</small>
+                          <small>Your sign-in email can&apos;t be changed here.</small>
                         </label>
                         <label className="profile-field">
                           <span>Father&apos;s name <small>Optional</small></span>
@@ -1646,7 +1659,7 @@ export default function Home() {
               <PageTitle
                 eyebrow="GENERAL AI CHAT"
                 title="Ask Z-Chat anything."
-                body="Explore ideas, ask general questions, or add a course for notes-based context and web research."
+                body="Ask general questions, or select a course and its study materials for source-based answers."
               >
                 <CourseSelect
                   label="OPTIONAL COURSE CONTEXT"
@@ -1654,6 +1667,7 @@ export default function Home() {
                   value={chatCourseId}
                   onChange={(value) => {
                     setChatCourseId(value);
+                    setChatDocumentSelection(null);
                     startNewChat();
                   }}
                 />
@@ -1664,9 +1678,59 @@ export default function Home() {
                   <span>{chatCourse ? `${chatCourse.code} - ${chatCourse.title}` : "General conversation"}</span>
                   <span className="grounded-tag">
                     <Sparkles size={13} />
-                    {chatCourse ? "COURSE NOTES" : "GROQ AI"}
+                    {chatCourse ? "COURSE MATERIALS" : "GROQ AI"}
                   </span>
                 </div>
+                {chatCourse && (
+                  <section className="study-sources chat-study-sources" aria-label="Course study materials">
+                    <div className="study-sources-heading">
+                      <div>
+                        <p className="eyebrow">ANSWER FROM</p>
+                        <strong>Choose study materials</strong>
+                      </div>
+                      {chatCourse.documents.length > 0 && (
+                        <button
+                          className="chat-study-select-all"
+                          type="button"
+                          onClick={() => setChatDocumentSelection(null)}
+                          disabled={effectiveChatDocumentIds.length === chatCourse.documents.length}
+                        >
+                          All
+                        </button>
+                      )}
+                    </div>
+                    {chatCourse.documents.length ? (
+                      <>
+                        <div className="study-source-list">
+                          {chatCourse.documents.map((doc) => {
+                            const selected = effectiveChatDocumentIds.includes(doc.id);
+                            return (
+                              <label className="study-source-option" key={doc.id}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  disabled={selected && effectiveChatDocumentIds.length === 1}
+                                  onChange={(event) => {
+                                    const next = new Set(effectiveChatDocumentIds);
+                                    if (event.currentTarget.checked) next.add(doc.id);
+                                    else next.delete(doc.id);
+                                    setChatDocumentSelection({ courseId: chatCourse.id, documentIds: [...next] });
+                                  }}
+                                />
+                                <span>{doc.fileName}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <p className="study-sources-empty">
+                          {effectiveChatDocumentIds.length} of {chatCourse.documents.length} materials selected.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="study-sources-empty">No study materials in this course yet. Upload files to use them as chat sources.</p>
+                    )}
+                  </section>
+                )}
                 <div className="chat-history-tools">
                   <span className="chat-unsaved-note">Messages are only kept while this page is open.</span>
                   <button className="button button-outline" onClick={startNewChat}>
@@ -1681,7 +1745,7 @@ export default function Home() {
                       </div>
                       <h2>What are you working through?</h2>
                       <p>
-                        Ask anything. Select a course above to include your notes and receive source-based answers.
+                        Ask anything. Select a course and study materials above to receive source-based answers.
                       </p>
                       <div className="prompt-chips">
                         <button
@@ -1710,11 +1774,16 @@ export default function Home() {
                         key={`${message.role}-${index}`}
                         className={`message message-${message.role}`}
                       >
-                        <div className="message-avatar">
+                        <div
+                          className={`message-avatar ${message.role === "user" && profilePhotoUrl ? "message-avatar-user-photo" : ""}`}
+                          role={message.role === "user" && profilePhotoUrl ? "img" : undefined}
+                          aria-label={message.role === "user" && profilePhotoUrl ? `${user.name} profile photo` : undefined}
+                          style={message.role === "user" && profilePhotoUrl ? { backgroundImage: `url("${profilePhotoUrl}")` } : undefined}
+                        >
                           {message.role === "assistant" ? (
-                            <Image src="/z-top-logo-purple.png" alt="Z-TOP assistant" width={26} height={26} />
+                            <Image src="/z-chat-logo.png" alt="Z-Chat assistant" width={30} height={30} />
                           ) : (
-                            user.name.slice(0, 1).toUpperCase()
+                            !profilePhotoUrl && user.name.slice(0, 1).toUpperCase()
                           )}
                         </div>
                         <div className="message-body">
@@ -1741,10 +1810,10 @@ export default function Home() {
                   {chatSending && (
                     <div className="message message-assistant chat-thinking" role="status" aria-live="polite">
                       <div className="message-avatar">
-                        <Image src="/z-top-logo-purple.png" alt="Z-TOP assistant" width={26} height={26} />
+                        <Image src="/z-chat-logo.png" alt="Z-Chat assistant" width={30} height={30} />
                       </div>
                       <div className="message-body">
-                        <p><LoaderCircle className="spin" size={14} /> {chatCourse ? "Checking your notes and searching the webâ€¦" : "Thinkingâ€¦"}</p>
+                        <p><LoaderCircle className="spin" size={14} /> {chatCourse ? "Checking your notes and searching the web…" : "Thinking…"}</p>
                       </div>
                     </div>
                   )}
@@ -1753,7 +1822,7 @@ export default function Home() {
                   <input
                     value={question}
                     onChange={(event) => setQuestion(event.target.value)}
-                    placeholder="Ask Z-Chat anythingâ€¦"
+                    placeholder="Ask Z-Chat anything…"
                     aria-label="Ask Z-Chat a question"
                     disabled={chatSending}
                   />
@@ -2082,7 +2151,7 @@ export default function Home() {
                         <div><strong>{item.code}</strong><span>{item.title}</span></div>
                         <div className="mastery-meter"><span style={{ width: `${item.averageScore ?? 0}%` }} /></div>
                         <strong className="mastery-score">{item.averageScore === null ? "-" : `${Math.round(item.averageScore)}%`}</strong>
-                        <small>{item.quizAttempts} quizzes Â· {item.studyMinutes} study min</small>
+                        <small>{item.quizAttempts} quizzes · {item.studyMinutes} study min</small>
                       </article>
                     ))}
                     {!analytics?.courses.length && <p className="muted analytics-empty">Add a course to start tracking study activity.</p>}

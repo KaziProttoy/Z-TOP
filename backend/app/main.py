@@ -587,7 +587,9 @@ def general_chat(payload: GeneralChatInput, user: User = Depends(current_user), 
     course_sources: list[dict[str, Any]] = []
     if payload.course_id is not None:
         course = _course(db, payload.course_id, user.id)
-        course_sources = _course_chat_sources(course, payload.question)
+        course_sources = _course_chat_sources(course, payload.question, document_ids=payload.document_ids)
+    elif payload.document_ids is not None:
+        raise HTTPException(status_code=422, detail="Choose a course before selecting study materials")
     history = [{"role": turn.role, "content": turn.content} for turn in payload.history[-12:]]
     try:
         result = ai.general_answer(payload.question.strip(), history, course_sources)
@@ -652,10 +654,15 @@ def _study_source(documents: list[CourseDocument]) -> str:
     return "\n\n".join(sources)[:50000]
 
 
-def _course_chat_sources(course: Course, question: str, limit: int = 6) -> list[dict[str, Any]]:
+def _course_chat_sources(
+    course: Course,
+    question: str,
+    limit: int = 6,
+    document_ids: list[int] | None = None,
+) -> list[dict[str, Any]]:
     terms = {word.lower() for word in re.findall(r"[a-zA-Z0-9]{3,}", question)}
     matches: list[tuple[int, str, int, str]] = []
-    for document in course.documents:
+    for document in _selected_study_documents(course, document_ids):
         for page, text in json.loads(document.pages_json):
             for chunk_page, chunk in _chunks([(int(page), text)]):
                 score = sum(chunk.lower().count(term) for term in terms)

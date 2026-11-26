@@ -196,7 +196,7 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .dossier-breadcrumb strong { color: var(--dossier-primary); font-weight: 700; }
 .dossier-hero { display: flex; align-items: center; justify-content: space-between; gap: 22px; border: 1px solid var(--dossier-line); border-radius: 8px; padding: 22px 25px; background: #fff; box-shadow: 0 2px 8px #17234308; }
 .dossier-identity { display: flex; min-width: 0; align-items: center; gap: 18px; }
-.dossier-photo { display: grid; width: 112px; height: 112px; flex: 0 0 auto; place-items: center; border: 1px solid #e1e5ef; border-radius: 8px; background: #e8edfa; background-position: center; background-size: cover; color: #4239ab; font-family: "Plus Jakarta Sans", var(--font-body); font-size: 36px; font-weight: 700; }
+.dossier-photo { display: grid; width: 112px; height: 112px; flex: 0 0 auto; place-items: center; border: 1px solid #e1e5ef; border-radius: 8px; background-color: #e8edfa; background-position: center; background-size: cover; background-repeat: no-repeat; color: #4239ab; font-family: "Plus Jakarta Sans", var(--font-body); font-size: 36px; font-weight: 700; }
 .dossier-title-block { min-width: 0; }
 .dossier-title-block .eyebrow { margin-bottom: 5px; }
 .dossier-title-block h1 { overflow-wrap: anywhere; margin: 0; color: var(--dossier-ink); font-family: "Plus Jakarta Sans", var(--font-body); font-size: 27px; font-weight: 700; }
@@ -364,6 +364,11 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .course-select > svg { position: absolute; right: 10px; bottom: 10px; color: #77837a; pointer-events: none; }
 .chat-workspace { display: flex; min-height: min(590px, calc(100vh - 220px)); flex-direction: column; border: 1px solid #e4e7df; border-radius: 7px; background: #fffefa; }
 .chat-head { display: flex; min-height: 49px; align-items: center; gap: 9px; border-bottom: 1px solid #eceee8; padding: 0 17px; color: #59675e; font-size: 10px; }
+.chat-study-sources { padding: 10px 16px; }
+.chat-study-sources .study-source-list { max-height: 92px; }
+.chat-study-sources .chat-study-select-all { border: 0; padding: 4px 2px; background: transparent; color: #3b7254; font-size: 10px; font-weight: 650; cursor: pointer; }
+.chat-study-sources .chat-study-select-all:disabled { color: #aab1aa; cursor: default; }
+.chat-study-sources .study-source-option input:disabled { cursor: not-allowed; opacity: .6; }
 .chat-history-tools { display: flex; min-height: 56px; align-items: center; justify-content: flex-end; gap: 9px; border-bottom: 1px solid #eceee8; padding: 7px 16px; background: #fbfbf7; }
 .chat-history-tools label { display: flex; min-width: 180px; align-items: center; gap: 8px; color: #879189; font-size: 8px; font-weight: 750; letter-spacing: .8px; }
 .chat-history-tools select { min-width: 0; flex: 1; border: 0; background: transparent; color: #516057; font-size: 10px; letter-spacing: 0; }
@@ -383,7 +388,8 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .message-user { align-self: flex-end; flex-direction: row-reverse; }
 .message-avatar { display: grid; width: 26px; height: 26px; flex: 0 0 auto; place-items: center; overflow: hidden; border-radius: 50%; background: #e7efe5; color: #477557; font-size: 10px; }
 .message-avatar img { width: 100%; height: 100%; object-fit: contain; }
-.message-user .message-avatar { background: #efe4d8; color: #77583c; }
+.message-avatar-user-photo { background-position: center; background-size: cover; background-repeat: no-repeat; }
+.message-user .message-avatar { background-color: #efe4d8; color: #77583c; }
 .message-body { min-width: 0; }
 .message-body > p { margin: 3px 0 9px; color: #354139; font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
 .chat-thinking .message-body > p { display: inline-flex; align-items: center; gap: 7px; color: #78877b; font-size: 11px; }
@@ -724,6 +730,10 @@ html, body { background: var(--paper); color: var(--ink); }
 .mode-tabs button, .flashcard { background: #101729; color: #b9c5e1; }
 .mode-tabs button.mode-active { border-color: #7657ff; color: #b6a8ff; }
 .study-source-option:hover, .prompt-chips button:hover { background: #17213a; }
+.app-shell.dark-mode .chat-study-sources .study-sources-heading strong, .app-shell.dark-mode .chat-study-sources .study-source-option { color: #c2cceb; }
+.app-shell.dark-mode .chat-study-sources .chat-study-select-all { color: #a995ff; }
+.app-shell.dark-mode .chat-study-sources .chat-study-select-all:disabled { color: #68799d; }
+.app-shell.dark-mode .chat-study-sources .study-sources-empty { color: #9aa8c7; }
 .prompt-chips button { border-color: #30405f; background: #0d1324; color: #aab8d8; }
 .reader-backdrop { background: #03050bcc; }
 .reader-modal { border-color: #2b3855; background: #101729; box-shadow: 0 20px 70px #00000077; }
@@ -733,7 +743,7 @@ html, body { background: var(--paper); color: var(--ink); }
 .reader-pdf { background: #111a2e; }
 .student-profile-page { --dossier-ink: #edf2ff; --dossier-muted: #9aa8c7; --dossier-line: #25304a; --dossier-primary: #8db4ff; background: #080b16; color: #edf2ff; }
 .dossier-hero, .dossier-card { border-color: #25304a; background: #101729; box-shadow: 0 2px 8px #00000030; }
-.dossier-photo { border-color: #30405f; background: #211a45; color: #b6a8ff; }
+.dossier-photo { border-color: #30405f; background-color: #211a45; color: #b6a8ff; }
 .dossier-title-block h1, .dossier-card-heading h2, .dossier-entry-title h3 { color: #edf2ff; }
 .dossier-subtitle, .dossier-entry-title > span { color: #9aa8c7; }
 .dossier-meta span { background: #172d4b; color: #b7d0ff; }
@@ -839,6 +849,10 @@ html, body, .main-area { background: var(--paper); color: var(--ink); }
 .mode-tabs button, .flashcard { background: #ffffff; color: #3d4d70; }
 .mode-tabs button.mode-active { border-color: #6552d9; color: #5140bf; }
 .study-source-option:hover, .prompt-chips button:hover { background: #f0f3fb; }
+.app-shell.light-mode .chat-study-sources .study-sources-heading strong, .app-shell.light-mode .chat-study-sources .study-source-option { color: #435147; }
+.app-shell.light-mode .chat-study-sources .chat-study-select-all { color: #5140bf; }
+.app-shell.light-mode .chat-study-sources .chat-study-select-all:disabled { color: #aab1aa; }
+.app-shell.light-mode .chat-study-sources .study-sources-empty { color: #8993a6; }
 .prompt-chips button { border-color: #dfe5f3; background: #fafbff; color: #586682; }
 .reader-backdrop { background: #18233d66; }
 .reader-modal { border-color: #dfe5f3; background: #ffffff; box-shadow: 0 20px 70px #30457a2b; }
@@ -848,7 +862,7 @@ html, body, .main-area { background: var(--paper); color: var(--ink); }
 .reader-pdf { background: #edf2fc; }
 .student-profile-page { --dossier-ink: #18233d; --dossier-muted: #687694; --dossier-line: #dfe5f3; --dossier-primary: #6552d9; background: #f5f7ff; color: #18233d; }
 .dossier-hero, .dossier-card { border-color: #dfe5f3; background: #ffffff; box-shadow: 0 2px 8px #30457a12; }
-.dossier-photo { border-color: #d4ddef; background: #eeeaff; color: #5140bf; }
+.dossier-photo { border-color: #d4ddef; background-color: #eeeaff; color: #5140bf; }
 .dossier-title-block h1, .dossier-card-heading h2, .dossier-entry-title h3 { color: #18233d; }
 .dossier-subtitle, .dossier-entry-title > span { color: #687694; }
 .dossier-meta span { background: #e8f2ff; color: #416bbd; }
