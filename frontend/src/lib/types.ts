@@ -110,5 +110,5 @@ export type Analytics = {
   dailyStudy: { date: string; minutes: number }[];
 };
 export type View =
-  "Overview" | "Courses" | "Z-Chat" | "Z-Study" | "Planner" | "Progress" | "Profile";
+  "Overview" | "Courses" | "Course Notes" | "Z-Chat" | "Z-Study" | "Planner" | "Progress" | "Profile";
 

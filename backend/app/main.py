@@ -411,6 +411,15 @@ def update_task(task_id: int, payload: TaskUpdate, user: User = Depends(current_
     return _task_json(task)
 
 
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    task = db.scalar(select(Task).where(Task.id == task_id, Task.owner_id == user.id))
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    db.delete(task)
+    db.commit()
+
+
 @app.post("/api/courses/{course_id}/documents", status_code=201)
 async def upload_document(course_id: int, file: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
     course = _course(db, course_id, user.id)
@@ -931,6 +940,24 @@ def create_study_plan(payload: PlanInput, user: User = Depends(current_user), db
             plan_tasks.append(task)
     db.commit()
     return {"courseId": course.id, "examDate": payload.exam_date.isoformat(), "hoursPerDay": payload.hours_per_day, "baselineQuizScore": round(average_score, 1) if average_score is not None else None, "tasks": [_task_json(task) for task in plan_tasks]}
+
+
+@app.delete("/api/plans/{course_id}")
+def delete_study_plan(course_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    course = _course(db, course_id, user.id)
+    plan_tasks = list(
+        db.scalars(
+            select(Task).where(
+                Task.owner_id == user.id,
+                Task.course_id == course.id,
+                Task.title.like("[Plan]%"),
+            )
+        )
+    )
+    for task in plan_tasks:
+        db.delete(task)
+    db.commit()
+    return {"deleted": len(plan_tasks)}
 
 
 @app.get("/api/analytics")

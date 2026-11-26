@@ -3,8 +3,10 @@
 import {
   ArrowDownLeft,
   ArrowLeft,
+  ArrowRight,
   ArrowUpRight,
   BarChart3,
+  Bell,
   BookOpen,
   Camera,
   CalendarDays,
@@ -25,11 +27,13 @@ import {
   Moon,
   MessageSquareText,
   Pencil,
+  Play,
   Plus,
   Send,
   Sparkles,
   Sun,
   Trash2,
+  Trophy,
   Upload,
   UserRound,
   UsersRound,
@@ -44,6 +48,7 @@ import type { Analytics, Asset, Citation, Course, Data, Doc, Message, OriginalFi
 const nav: { label: View; icon: typeof LayoutDashboard }[] = [
   { label: "Overview", icon: LayoutDashboard },
   { label: "Courses", icon: BookOpen },
+  { label: "Course Notes", icon: FileText },
   { label: "Z-Chat", icon: MessageSquareText },
   { label: "Z-Study", icon: Sparkles },
   { label: "Planner", icon: CalendarDays },
@@ -73,6 +78,7 @@ export default function Home() {
   const [darkMode, setDarkMode] = useState(() =>
     typeof window !== "undefined" && localStorage.getItem("z-top-dark-mode") === "true",
   );
+  const brandLogo = darkMode ? "/z-top-logo-night.png" : "/z-top-logo-day.png";
   const [view, setView] = useState<View>("Overview");
   const [courseId, setCourseId] = useState<number | "">("");
   const [courseDetailId, setCourseDetailId] = useState<number | null>(null);
@@ -100,6 +106,9 @@ export default function Home() {
   const [readerElapsedSeconds, setReaderElapsedSeconds] = useState(0);
   const [readerLoading, setReaderLoading] = useState(false);
   const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
+  const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
+  const [deletingPlanCourseId, setDeletingPlanCourseId] = useState<number | null>(null);
+  const [planCourseToRemove, setPlanCourseToRemove] = useState<number | "">("");
   const docxPreviewRef = useRef<HTMLDivElement>(null);
   const [courseModal, setCourseModal] = useState(false);
   const [courseCode, setCourseCode] = useState("");
@@ -341,6 +350,56 @@ export default function Home() {
     }
   }
 
+  async function removeTask(task: Task) {
+    if (deletingTaskId !== null || deletingPlanCourseId !== null) return;
+    if (!window.confirm(`Remove "${task.title}" from your planner? This cannot be undone.`)) return;
+    setDeletingTaskId(task.id);
+    setError("");
+    try {
+      await api(`/api/tasks/${task.id}`, token, { method: "DELETE" });
+      await refresh();
+      setNotice("Plan item removed from your planner.");
+    } catch (reason) {
+      fail(reason);
+    } finally {
+      setDeletingTaskId(null);
+    }
+  }
+
+  async function removeStudyPlan() {
+    const selectedCourse = courses.find((item) => item.id === selectedPlanCourseId);
+    if (!selectedCourse || deletingTaskId !== null || deletingPlanCourseId !== null) return;
+    const planTaskCount = tasks.filter(
+      (task) =>
+        task.courseId === selectedCourse.id && task.title.startsWith("[Plan]"),
+    ).length;
+    if (!planTaskCount) return;
+    if (
+      !window.confirm(
+        `Remove the generated plan for ${selectedCourse.code}? This will delete ${planTaskCount} plan items and cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingPlanCourseId(selectedCourse.id);
+    setError("");
+    try {
+      const result = await api<{ deleted: number }>(
+        `/api/plans/${selectedCourse.id}`,
+        token,
+        { method: "DELETE" },
+      );
+      await refresh();
+      setNotice(
+        `${result.deleted} plan item${result.deleted === 1 ? "" : "s"} removed for ${selectedCourse.code}.`,
+      );
+    } catch (reason) {
+      fail(reason);
+    } finally {
+      setDeletingPlanCourseId(null);
+    }
+  }
+
   async function upload(file?: File) {
     if (!file || !courseId) return;
     const form = new FormData();
@@ -453,6 +512,7 @@ export default function Home() {
       });
       setPlanModal(false);
       setExamDate("");
+      setPlanCourseToRemove(courseId);
       setNotice(
         `Study plan created with ${result.tasks.length} sessions${result.baselineQuizScore === null ? "." : `, adjusted for your ${result.baselineQuizScore}% quiz average.`}`,
       );
@@ -509,19 +569,20 @@ export default function Home() {
     }
   }
 
-  async function openDocument(doc: Doc) {
-    if (!courseId || readerLoading) return;
+  async function openDocument(doc: Doc, documentCourseId = courseId) {
+    if (!documentCourseId || readerLoading) return;
+    setCourseId(documentCourseId);
     setReaderLoading(true);
     setError("");
     try {
       const material = await api<ReaderMaterial>(
-        `/api/courses/${courseId}/documents/${doc.id}`,
+        `/api/courses/${documentCourseId}/documents/${doc.id}`,
         token,
       );
       let original: OriginalFile | null = null;
       try {
         original = await apiFile(
-          `/api/courses/${courseId}/documents/${doc.id}/file`,
+          `/api/courses/${documentCourseId}/documents/${doc.id}/file`,
           token,
         );
       } catch {
@@ -705,8 +766,8 @@ export default function Home() {
 
   if (!ready)
     return (
-      <main className="boot-screen">
-        <Image className="brand-logo brand-logo-loading" src="/z-top-logo-purple.png" alt="Z-TOP" width={120} height={48} priority />
+      <main className={`boot-screen ${darkMode ? "dark-mode" : ""}`}>
+        <Image className="brand-logo brand-logo-loading" src={brandLogo} alt="Z-TOP" width={645} height={575} priority />
         <LoaderCircle className="spin" size={18} />
       </main>
     );
@@ -716,7 +777,7 @@ export default function Home() {
       <main className={`auth-page ${darkMode ? "dark-mode" : ""}`}>
         <header className="auth-nav">
           <a className="auth-logo" href="#home" aria-label="Z-Top home">
-            <Image className="brand-logo brand-logo-auth" src="/z-top-logo-purple.png" alt="Z-TOP" width={120} height={48} priority />
+            <Image className="brand-logo brand-logo-auth" src={brandLogo} alt="Z-TOP" width={645} height={575} priority />
           </a>
           <div className="auth-nav-actions">
             <button
@@ -802,7 +863,18 @@ export default function Home() {
     );
 
   const courses = data?.courses ?? [];
+  const coursesWithNotes = courses.filter((item) => item.documents.length > 0);
   const tasks = data?.tasks ?? [];
+  const generatedPlanCourses = courses.filter((item) =>
+    tasks.some(
+      (task) => task.courseId === item.id && task.title.startsWith("[Plan]"),
+    ),
+  );
+  const selectedPlanCourseId = generatedPlanCourses.some(
+    (item) => item.id === planCourseToRemove,
+  )
+    ? planCourseToRemove
+    : (generatedPlanCourses[0]?.id ?? "");
   const course = courses.find((item) => item.id === courseId);
   const courseDetail = courses.find((item) => item.id === courseDetailId);
   const chatCourse = courses.find((item) => item.id === chatCourseId);
@@ -866,7 +938,7 @@ export default function Home() {
     <div className={`app-shell ${view !== "Overview" ? "feature-mode" : ""} ${darkMode ? "dark-mode" : ""}`}>
       <aside className="sidebar">
         <a className="wordmark" href="#home">
-          <Image className="brand-logo brand-logo-sidebar" src="/z-top-logo-purple.png" alt="Z-TOP" width={150} height={60} priority />
+          <Image className="brand-logo brand-logo-sidebar" src={brandLogo} alt="Z-TOP" width={645} height={575} priority />
         </a>
         <div className="workspace-label">YOUR WORKSPACE</div>
         <nav className="main-nav" aria-label="Main navigation">
@@ -939,21 +1011,35 @@ export default function Home() {
             >
               {darkMode ? <Sun size={15} /> : <Moon size={15} />}
             </button>
-            <span className="today-label">
-              <Clock3 size={15} />
-              {today}
-            </span>
+            <button
+              className="notification-button"
+              type="button"
+              aria-label="Notifications"
+              title="Notifications"
+              onClick={() => {
+                setError("");
+                setNotice("You're all caught up.");
+              }}
+            >
+              <Bell size={18} />
+            </button>
+            <span className="today-label">{today}</span>
             <div className="profile-menu-anchor" ref={profilePanelRef}>
               <button
-                className="avatar top-avatar profile-trigger"
+                className="profile-trigger"
                 type="button"
-                style={profilePhotoUrl ? { backgroundImage: `url("${profilePhotoUrl}")` } : undefined}
                 aria-label="Open student profile"
                 aria-expanded={profileOpen}
                 aria-controls="student-profile-menu"
                 onClick={() => setProfileOpen((open) => !open)}
               >
-                {!profilePhotoUrl && user.name.slice(0, 1).toUpperCase()}
+                <span
+                  className="avatar top-avatar"
+                  style={profilePhotoUrl ? { backgroundImage: `url("${profilePhotoUrl}")` } : undefined}
+                >
+                  {!profilePhotoUrl && user.name.slice(0, 1).toUpperCase()}
+                </span>
+                <ChevronDown size={14} aria-hidden="true" />
               </button>
               {profileOpen && (
                 <section
@@ -1371,14 +1457,11 @@ export default function Home() {
           {view === "Overview" && (
             <>
               <section className="welcome-row">
-                <div>
-                  <p className="eyebrow">{today.toUpperCase()}</p>
-                  <h1>
-                    Good morning, {firstName}
-                    <span className="period-dot">.</span>
-                  </h1>
+                <div className="welcome-copy">
+                  <p className="welcome-greeting">Hello, {user.name}!</p>
+                  <h1>Good morning, {firstName}.</h1>
                   <p className="muted">
-                    A little progress adds up. Here&apos;s your day at a glance.
+                    A little progress each day leads you closer to your goals.
                   </p>
                 </div>
                 <button
@@ -1393,30 +1476,34 @@ export default function Home() {
                 <Stat
                   label="COURSES"
                   value={data?.stats.courseCount ?? 0}
-                  note="in your workspace"
+                  note="My enrolled courses"
                   className="stat-green"
                   icon={<BookOpen size={17} />}
+                  onClick={() => openView("Courses")}
                 />
                 <Stat
                   label="OPEN TASKS"
                   value={data?.stats.openTasks ?? 0}
-                  note="still on your list"
+                  note="Before you start"
                   className="stat-lilac"
                   icon={<CheckCheck size={17} />}
+                  onClick={() => openView("Planner")}
                 />
                 <Stat
                   label="STUDY TIME"
                   value={`${Math.floor((data?.stats.studyMinutes ?? 0) / 60)}h ${(data?.stats.studyMinutes ?? 0) % 60}m`}
-                  note="logged this week"
+                  note="Logged this week"
                   className="stat-peach"
                   icon={<Clock3 size={17} />}
+                  onClick={() => openView("Progress")}
                 />
                 <Stat
                   label="COURSE NOTES"
                   value={data?.stats.documents ?? 0}
-                  note="ready to explore"
+                  note="Notes to review"
                   className="stat-blue"
                   icon={<FileText size={17} />}
+                  onClick={() => openView("Course Notes")}
                 />
               </section>
               <div className="dashboard-grid">
@@ -1474,31 +1561,33 @@ export default function Home() {
                 </section>
                 <section className="panel focus-panel">
                   <div className="focus-illustration">
-                    <div className="sun-shape" />
                     <div className="focus-lines">
                       <span />
                       <span />
                       <span />
                     </div>
-                    <BookOpen className="focus-book" size={26} />
+                    <Trophy className="focus-trophy" size={66} aria-hidden="true" />
                   </div>
-                  <p className="eyebrow">A SMALL WIN</p>
+                  <p className="eyebrow focus-eyebrow">
+                    <Trophy size={15} aria-hidden="true" />
+                    A SMALL WIN
+                  </p>
                   <h2>Make 25 minutes count.</h2>
                   <p className="muted">
-                    Pick a course, settle in, and give one thing your full
-                    attention.
+                    That&apos;s 25 minutes closer to your learning goal!
                   </p>
                   <CourseSelect
                     courses={courses}
                     value={courseId}
                     onChange={setCourseId}
+                    label="CHOOSE"
                   />
                   <button
                     className="button button-green focus-button"
                     disabled={!courseId}
                     onClick={logSession}
                   >
-                    <Check size={16} />
+                    <Play size={15} fill="currentColor" />
                     Log a study session
                   </button>
                 </section>
@@ -1539,7 +1628,14 @@ export default function Home() {
                     ? "Study materials and files for this course."
                     : "Keep your notes close to the work they support."
                 }
+                className={courseDetail ? undefined : "courses-hero"}
               >
+                {!courseDetail && (
+                  <div className="courses-hero-art" aria-hidden="true">
+                    <BookOpen className="courses-hero-book" size={124} />
+                    <GraduationCap className="courses-hero-cap" size={84} />
+                  </div>
+                )}
                 {courseDetail ? (
                   <button
                     className="button button-outline"
@@ -1554,7 +1650,7 @@ export default function Home() {
                     onClick={() => setCourseModal(true)}
                   >
                     <Plus size={16} />
-                    New course
+                    Add a course
                   </button>
                 )}
               </PageTitle>
@@ -1650,6 +1746,87 @@ export default function Home() {
                   }}
                   onAdd={() => setCourseModal(true)}
                 />
+              )}
+            </section>
+          )}
+
+          {view === "Course Notes" && (
+            <section className="page-section">
+              <PageTitle
+                eyebrow="YOUR STUDY MATERIALS"
+                title="Course Notes"
+                body="Browse and open notes from all of your courses in one place."
+              >
+                <button
+                  className="button button-outline"
+                  type="button"
+                  onClick={() => openView("Courses")}
+                >
+                  <BookOpen size={16} />
+                  Browse courses
+                </button>
+              </PageTitle>
+              {coursesWithNotes.length ? (
+                <div className="notes-course-list">
+                  {coursesWithNotes.map((course) => (
+                    <section className="panel notes-course" key={course.id}>
+                      <div className="panel-heading notes-course-heading">
+                        <div>
+                          <p className="eyebrow">{course.code}</p>
+                          <h2>{course.title}</h2>
+                        </div>
+                        <span className="notes-count">
+                          {course.documents.length}{" "}
+                          {course.documents.length === 1 ? "note" : "notes"}
+                        </span>
+                      </div>
+                      <div className="document-list">
+                        {course.documents.map((doc) => (
+                          <div className="document-row" key={doc.id}>
+                            <button
+                              className="document-open"
+                              type="button"
+                              disabled={readerLoading}
+                              onClick={() => void openDocument(doc, course.id)}
+                            >
+                              <span className="doc-icon">
+                                <FileText size={17} />
+                              </span>
+                              <span>
+                                <strong>{doc.fileName}</strong>
+                                <small>
+                                  {doc.characters
+                                    ? `${doc.characters.toLocaleString()} characters - `
+                                    : ""}
+                                  Added {dateLabel(doc.uploadedAt)}
+                                </small>
+                              </span>
+                              <ArrowUpRight size={16} className="doc-open" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <div className="course-empty notes-empty">
+                  <div className="empty-icon">
+                    <FileText size={21} />
+                  </div>
+                  <h3>No course notes yet</h3>
+                  <p className="muted">
+                    Upload notes to a course and they&apos;ll all appear here.
+                  </p>
+                  <button
+                    className="button button-outline"
+                    type="button"
+                    onClick={() => openView("Courses")}
+                  >
+                    <BookOpen size={15} />
+                    Browse courses
+                  </button>
+                </div>
               )}
             </section>
           )}
@@ -2014,6 +2191,33 @@ export default function Home() {
                     <Sparkles size={15} />
                     Build exam plan
                   </button>
+                  {generatedPlanCourses.length > 0 && (
+                    <div className="planner-remove-plan">
+                      <CourseSelect
+                        label="GENERATED PLAN"
+                        courses={generatedPlanCourses}
+                        value={selectedPlanCourseId}
+                        onChange={setPlanCourseToRemove}
+                      />
+                      <button
+                        className="button button-outline planner-remove-button"
+                        type="button"
+                        disabled={
+                          !selectedPlanCourseId ||
+                          deletingTaskId !== null ||
+                          deletingPlanCourseId !== null
+                        }
+                        onClick={() => void removeStudyPlan()}
+                      >
+                        {deletingPlanCourseId === selectedPlanCourseId ? (
+                          <LoaderCircle className="spin" size={15} />
+                        ) : (
+                          <Trash2 size={15} />
+                        )}
+                        Remove plan
+                      </button>
+                    </div>
+                  )}
                   <button
                     className="button button-dark"
                     onClick={() => setTaskModal(true)}
@@ -2089,12 +2293,30 @@ export default function Home() {
                             )}
                             {status !== "COMPLETED" && (
                               <button
+                                type="button"
                                 onClick={() => moveTask(task, "COMPLETED")}
                               >
                                 <Check size={14} />
                                 Done
                               </button>
                             )}
+                            <button
+                              className="task-delete-button"
+                              type="button"
+                              disabled={
+                                deletingTaskId !== null ||
+                                deletingPlanCourseId !== null
+                              }
+                              onClick={() => void removeTask(task)}
+                              aria-label={`Remove ${task.title} from planner`}
+                              title="Remove from planner"
+                            >
+                              {deletingTaskId === task.id ? (
+                                <LoaderCircle className="spin" size={14} />
+                              ) : (
+                                <Trash2 size={14} />
+                              )}
+                            </button>
                           </div>
                         </article>
                       ))}
@@ -2348,21 +2570,46 @@ function Stat({
   note,
   className,
   icon,
+  onClick,
 }: {
   label: string;
   value: string | number;
   note: string;
   className: string;
   icon: ReactNode;
+  onClick?: () => void;
 }) {
+  const content = (
+    <>
+      <span className="stat-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <div className="stat-content">
+        <div className="stat-top">{label}</div>
+        <strong>{value}</strong>
+        <small>{note}</small>
+      </div>
+      <span className="stat-arrow" aria-hidden="true">
+        <ArrowRight size={16} />
+      </span>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        className={`stat-card stat-card-action ${className}`}
+        type="button"
+        onClick={onClick}
+      >
+        {content}
+      </button>
+    );
+  }
+
   return (
     <article className={`stat-card ${className}`}>
-      <div className="stat-top">
-        <span>{label}</span>
-        {icon}
-      </div>
-      <strong>{value}</strong>
-      <small>{note}</small>
+      {content}
     </article>
   );
 }
@@ -2401,14 +2648,16 @@ function PageTitle({
   title,
   body,
   children,
+  className,
 }: {
   eyebrow: string;
   title: string;
   body: string;
   children?: ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="page-title-row">
+    <div className={`page-title-row ${className ?? ""}`}>
       <div>
         <p className="eyebrow">{eyebrow}</p>
         <h1>{title}</h1>

@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   title: "Z-Top | Your academic co-pilot",
   description: "A focused workspace for course materials, study tools, and academic planning.",
   icons: {
-    icon: "/z-top-logo-purple.png",
+    icon: "/z-top-logo-day.png",
   },
 };
 
